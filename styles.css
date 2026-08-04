@@ -1,0 +1,58 @@
+:root{
+  --bg:#eef1f5;--panel:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;
+  --accent:#2563eb;--accent2:#1d4ed8;--ok:#16a34a;--bad:#dc2626;--lock:#7c3aed;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+button,input,select{font:inherit}
+button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:.72rem .8rem;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:active{background:var(--accent2)}
+input,select{width:100%;padding:.65rem;border:1px solid var(--line);border-radius:9px;background:#fff}
+label{display:grid;gap:.35rem;color:var(--muted);font-size:.88rem}
+h1,h2,p{margin:0}
+h1{font-size:1.35rem}
+h2{font-size:1rem;margin-bottom:.7rem}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem;background:#111827;color:#fff}
+.topbar p{color:#cbd5e1;font-size:.86rem;margin-top:.15rem}
+.app{display:grid;grid-template-columns:340px minmax(0,1fr);min-height:calc(100vh - 74px)}
+.sidebar{padding:1rem;background:#f8fafc;border-right:1px solid var(--line);overflow:auto}
+.card{background:var(--panel);border:1px solid #e5e7eb;border-radius:14px;padding:1rem;margin-bottom:.9rem}
+.card>button{width:100%;margin-top:.7rem}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin-bottom:.65rem}
+.buttonGrid{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
+.checkrow{display:flex;align-items:center;gap:.55rem;margin:.55rem 0;color:var(--text)}
+.checkrow input{width:auto}
+.selectedInfo{min-height:48px;padding:.65rem;background:#f3f4f6;border-radius:9px;margin-bottom:.7rem;font-size:.88rem}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
+.metrics>div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:.65rem}
+.metrics .wide{grid-column:1/-1}
+.metrics span{display:block;color:var(--muted);font-size:.75rem}
+.metrics strong{font-size:1rem}
+.workspace{padding:1rem;min-width:0}
+.workspaceTop{display:flex;justify-content:space-between;gap:1rem;align-items:flex-end;margin-bottom:.75rem}
+.workspaceTop p,.tip{font-size:.86rem;color:var(--muted);margin-top:.2rem}
+.legend{display:flex;gap:.7rem;flex-wrap:wrap;font-size:.8rem}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px}
+.legend .valid{background:var(--ok)}.legend .invalid{background:var(--bad)}.legend .locked{background:var(--lock)}
+.canvasWrap{background:#dde3ea;border-radius:14px;padding:1rem;overflow:auto;max-height:calc(100vh - 155px)}
+.trailer{position:relative;margin:0 auto;background:
+linear-gradient(to right,rgba(0,0,0,.05) 1px,transparent 1px),
+linear-gradient(to bottom,rgba(0,0,0,.05) 1px,transparent 1px),#fff;
+border:4px solid #111827;touch-action:none;user-select:none}
+.noseTag,.doorTag{position:absolute;left:50%;transform:translateX(-50%);z-index:5;background:#111827;color:#fff;border-radius:99px;padding:.15rem .45rem;font-size:.66rem;font-weight:700}
+.noseTag{top:3px}.doorTag{bottom:3px}
+.stack{position:absolute;border:2px solid var(--ok);background:rgba(37,99,235,.16);border-radius:6px;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;font-size:.64rem;font-weight:700;line-height:1.05;overflow:hidden;cursor:grab;touch-action:none}
+.stack small{display:block;font-weight:500}
+.stack.selected{outline:3px solid #f59e0b;z-index:8}
+.stack.invalid{border-color:var(--bad);background:rgba(220,38,38,.2)}
+.stack.locked{border-color:var(--lock);background:rgba(124,58,237,.18);cursor:not-allowed}
+.freeZone{position:absolute;left:0;right:0;bottom:0;pointer-events:none;background:repeating-linear-gradient(45deg,rgba(22,163,74,.08),rgba(22,163,74,.08) 8px,transparent 8px,transparent 16px)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#111827;color:#fff;border-radius:10px;padding:.7rem 1rem;opacity:0;pointer-events:none;transition:.2s;z-index:50}
+.toast.show{opacity:1}
+@media(max-width:900px){
+  .app{grid-template-columns:1fr}
+  .sidebar{border-right:0;border-bottom:1px solid var(--line)}
+  .workspaceTop{align-items:flex-start;flex-direction:column}
+  .canvasWrap{max-height:none}
+}

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>LoadMaster AI</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>LoadMaster AI</h1>
+    <p>La IA que aprende a cargar como tú.</p>
+  </div>
+  <button id="installBtn" class="primary" hidden>Instalar</button>
+</header>
+
+<main class="app">
+  <aside class="sidebar">
+    <section class="card">
+      <h2>Tráiler</h2>
+      <label>Modelo guardado
+        <select id="trailerPreset">
+          <option value="96x300">96×300</option>
+          <option value="96x330">96×330</option>
+          <option value="95x574">95×574</option>
+          <option value="96x574">96×574</option>
+          <option value="95x628">95×628</option>
+          <option value="96x628">96×628</option>
+          <option value="98x628">98×628</option>
+          <option value="custom">Personalizado</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label>Ancho (pulg.)
+          <input id="trailerWidth" type="number" min="1" value="96">
+        </label>
+        <label>Largo (pulg.)
+          <input id="trailerLength" type="number" min="1" value="300">
+        </label>
+      </div>
+      <button id="applyTrailer">Aplicar</button>
+    </section>
+
+    <section class="card">
+      <h2>Agregar pallet</h2>
+      <label>Biblioteca
+        <select id="librarySelect">
+          <option value="">— Nueva medida —</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label>Ancho
+          <input id="palletWidth" type="number" min="1" value="48">
+        </label>
+        <label>Largo
+          <input id="palletLength" type="number" min="1" value="40">
+        </label>
+        <label>Cantidad total
+          <input id="palletQty" type="number" min="1" value="1">
+        </label>
+        <label>Máximo por pila
+          <input id="maxHeight" type="number" min="1" value="13">
+        </label>
+        <label>Tipo
+          <select id="palletType">
+            <option value="4-way">4-way</option>
+            <option value="2-way">2-way</option>
+          </select>
+        </label>
+        <label>Categoría
+          <select id="category">
+            <option>New</option>
+            <option>Combo</option>
+            <option>Refurbished</option>
+            <option>HT</option>
+            <option>Otra</option>
+          </select>
+        </label>
+      </div>
+      <label class="checkrow">
+        <input id="canRotate" type="checkbox" checked>
+        Se puede girar
+      </label>
+      <label>Nombre / medida
+        <input id="palletName" type="text" value="48×40">
+      </label>
+      <div class="grid2">
+        <button id="saveLibrary">Guardar medida</button>
+        <button id="addPallet" class="primary">Crear pilas</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Pila seleccionada</h2>
+      <div id="selectedInfo" class="selectedInfo">Ninguna seleccionada</div>
+      <div class="buttonGrid">
+        <button id="rotateBtn">Girar</button>
+        <button id="lockBtn">Bloquear</button>
+        <button id="duplicateBtn">Duplicar</button>
+        <button id="deleteBtn">Eliminar</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Herramientas</h2>
+      <div class="buttonGrid">
+        <button id="undoBtn">Deshacer</button>
+        <button id="redoBtn">Rehacer</button>
+        <button id="compactBtn">Compactar</button>
+        <button id="optimizeBtn" class="primary">Optimizar libres</button>
+        <button id="clearBtn">Vaciar carga</button>
+        <button id="demoBtn">Cargar ejemplo</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Guardar / exportar</h2>
+      <div class="buttonGrid">
+        <button id="saveLoadBtn">Guardar archivo</button>
+        <button id="openLoadBtn">Abrir archivo</button>
+        <button id="printBtn">Imprimir / PDF</button>
+      </div>
+      <input id="fileInput" type="file" accept=".json" hidden>
+    </section>
+
+    <section class="metrics">
+      <div><span>Pilas</span><strong id="metricStacks">0</strong></div>
+      <div><span>Pallets</span><strong id="metricPallets">0</strong></div>
+      <div><span>Largo usado</span><strong id="metricUsed">0"</strong></div>
+      <div><span>Libre al final</span><strong id="metricFree">300"</strong></div>
+      <div class="wide"><span>Estado</span><strong id="metricStatus">Carga válida</strong></div>
+    </section>
+  </aside>
+
+  <section class="workspace">
+    <div class="workspaceTop">
+      <div>
+        <strong>NARIZ</strong>
+        <p>Toca una pila y arrástrala. Las pilas verdes caben; las rojas chocan o salen del tráiler.</p>
+      </div>
+      <div class="legend">
+        <span><i class="valid"></i> Válida</span>
+        <span><i class="invalid"></i> Conflicto</span>
+        <span><i class="locked"></i> Bloqueada</span>
+      </div>
+    </div>
+
+    <div class="canvasWrap">
+      <div id="trailer" class="trailer">
+        <div class="noseTag">NARIZ</div>
+        <div class="doorTag">PUERTAS</div>
+        <div id="freeZone" class="freeZone"></div>
+      </div>
+    </div>
+    <p class="tip">Consejo: bloquea las pilas que no quieras que la optimización mueva.</p>
+  </section>
+</main>
+
+<div id="toast" class="toast" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
