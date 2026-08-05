@@ -1,4 +1,4 @@
-const CACHE="loadmaster-ai-v0.4-floating-tools";
+const CACHE="loadmaster-ai-v0.5-navigation";
 const ASSETS=["./","./index.html","./styles.css","./app.js","./manifest.webmanifest","./icon.svg"];
 
 self.addEventListener("install",event=>{

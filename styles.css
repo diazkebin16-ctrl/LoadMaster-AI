@@ -35,14 +35,14 @@ h2{font-size:1rem;margin-bottom:.7rem}
 .legend{display:flex;gap:.7rem;flex-wrap:wrap;font-size:.8rem}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:3px}
 .legend .valid{background:var(--ok)}.legend .invalid{background:var(--bad)}.legend .locked{background:var(--lock)}
-.canvasWrap{background:#dde3ea;border-radius:14px;padding:1rem;overflow:auto;max-height:calc(100vh - 155px);overscroll-behavior:contain}
+.canvasWrap{background:#dde3ea;border-radius:14px;padding:1rem;overflow:auto;max-height:calc(100vh - 155px);overscroll-behavior:contain;touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch}
 .trailer{position:relative;margin:110px auto 180px;background:
 linear-gradient(to right,rgba(0,0,0,.05) 1px,transparent 1px),
 linear-gradient(to bottom,rgba(0,0,0,.05) 1px,transparent 1px),#fff;overflow:visible;
-border:4px solid #111827;touch-action:none;user-select:none}
+border:4px solid #111827;touch-action:pan-x pan-y;user-select:none}
 .noseTag,.doorTag{position:absolute;left:50%;transform:translateX(-50%);z-index:5;background:#111827;color:#fff;border-radius:99px;padding:.15rem .45rem;font-size:.66rem;font-weight:700}
 .noseTag{top:3px}.doorTag{bottom:3px}
-.stack{position:absolute;border:2px solid var(--ok);background:rgba(37,99,235,.16);border-radius:6px;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;font-size:.64rem;font-weight:700;line-height:1.05;overflow:hidden;cursor:grab;touch-action:none}
+.stack{position:absolute;border:2px solid var(--ok);background:rgba(37,99,235,.16);border-radius:6px;display:flex;align-items:center;justify-content:center;text-align:center;padding:2px;font-size:.64rem;font-weight:700;line-height:1.05;overflow:hidden;cursor:grab;touch-action:none;overscroll-behavior:none}
 .stack small{display:block;font-weight:500}
 .stack.selected{outline:3px solid #f59e0b;z-index:8}
 .stack.invalid{border-color:var(--bad);background:rgba(220,38,38,.2)}
@@ -85,7 +85,8 @@ border:4px solid #111827;touch-action:none;user-select:none}
 .stack.invalid{z-index:12}
 
 
-/* v0.4: controles flotantes junto a la pila seleccionada */
+
+/* v0.5: controles flotantes separados de la pila */
 .floatingTools{
   position:absolute;
   z-index:30;
@@ -94,10 +95,10 @@ border:4px solid #111827;touch-action:none;user-select:none}
   padding:.35rem;
   border:1px solid var(--line);
   border-radius:12px;
-  background:rgba(255,255,255,.96);
+  background:rgba(255,255,255,.97);
   box-shadow:0 6px 18px rgba(15,23,42,.18);
-  transform:translate(-50%, -115%);
   pointer-events:auto;
+  white-space:nowrap;
 }
 .floatingTools[hidden]{display:none}
 .floatingTools button{
@@ -114,10 +115,7 @@ border:4px solid #111827;touch-action:none;user-select:none}
   font-weight:700;
 }
 @media(max-width:600px){
-  .floatingTools{
-    gap:.25rem;
-    padding:.28rem;
-  }
+  .floatingTools{gap:.25rem;padding:.28rem}
   .floatingTools button{
     min-width:40px;
     min-height:40px;

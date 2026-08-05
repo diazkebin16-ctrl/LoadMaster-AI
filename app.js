@@ -81,17 +81,23 @@
     }
     tools.hidden=false;
 
-    // Prefer above the selected stack. If too close to the top, show below it.
-    const centerX=(s.x+s.w/2)*SCALE;
-    let topY=s.y*SCALE;
-    let translateY="-115%";
-    if(topY<55){
-      topY=(s.y+s.l)*SCALE+8;
-      translateY="0";
+    // Colocar el menú fuera de la pila para no taparla.
+    // Preferimos el lado derecho; si no cabe, usamos el izquierdo.
+    const toolWidth=150;
+    const gap=16;
+    const rightX=(s.x+s.w)*SCALE+gap;
+    const leftX=s.x*SCALE-toolWidth-gap;
+    let x=rightX;
+    if(rightX+toolWidth > state.trailer.width*SCALE+120 && leftX >= -100){
+      x=leftX;
     }
-    tools.style.left=`${centerX}px`;
-    tools.style.top=`${topY}px`;
-    tools.style.transform=`translate(-50%, ${translateY})`;
+
+    let y=(s.y+s.l/2)*SCALE;
+    y=Math.max(-70, Math.min(y, state.trailer.length*SCALE+70));
+
+    tools.style.left=`${x}px`;
+    tools.style.top=`${y}px`;
+    tools.style.transform="translateY(-50%)";
 
     const rotate=$("floatRotateBtn");
     const lock=$("floatLockBtn");
@@ -289,6 +295,16 @@
     saveLibrary(); toast("Medida guardada en la biblioteca");
   }
 
+
+
+  // En el área vacía del tráiler se permite desplazar la pantalla.
+  // Solo las pilas capturan el gesto para arrastrarse.
+  trailerEl.addEventListener("pointerdown",e=>{
+    if(e.target===trailerEl || e.target.classList.contains("freeZone")){
+      state.selectedId=null;
+      render();
+    }
+  });
 
   $("floatRotateBtn").addEventListener("click",()=>{
     $("rotateBtn").click();
