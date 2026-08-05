@@ -1,12 +1,3 @@
-# LoadMaster AI v4.0 — Engine v2 modular
+# LoadMaster AI v4.2
 
-Reescritura modular del núcleo de la Fase 2. El optimizador trabaja sobre una copia virtual, valida todas las pilas antes de aplicar una solución y nunca acepta pallets fuera del tráiler o superpuestos.
-
-Módulos: geometry, collision, validator, scoring, refine y optimizer. Tráiler predeterminado: 96 × 628 pulgadas.
-
-
-## v4.1 — Secuencias y rotaciones
-- Prueba orientación normal y girada para cada pila 4-way.
-- Conserva varias soluciones parciales para evitar descartar giros útiles demasiado pronto.
-- Ejecuta búsqueda local de dos acciones: girar/mover una pila y después recolocar otra.
-- Rechaza cualquier resultado con superposición o fuera del tráiler.
+Versión correctiva basada en la interfaz funcional v4.0. Restaura la configuración completa del tráiler, creación y guardado de medidas, biblioteca, edición y herramientas. Mantiene la búsqueda por secuencias y rotaciones de v4.1 dentro del motor, sin reemplazar la interfaz.

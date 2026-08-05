@@ -102,7 +102,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
         if(!validation.ok){$("optimizerSummary").textContent=`Solución rechazada: ${explainValidation(validation)}`;return;}
         this.store.remember();this.state.stacks=clone(best.stacks);this.render();
         const saved=Math.max(0,beforeUsed-best.used);
-        const moveDetails=best.stacks.map(s=>{const o=before.find(x=>x.id===s.id);if(!o)return null;const dx=s.x-o.x,dy=s.y-o.y;return (Math.abs(dx)>EPS||Math.abs(dy)>EPS)?`${s.name}: x ${o.x.toFixed(1)}→${s.x.toFixed(1)}, y ${o.y.toFixed(1)}→${s.y.toFixed(1)}${(o.w!==s.w||o.l!==s.l)?" · girada":""}`:null;}).filter(Boolean);
+        const moveDetails=best.stacks.map(s=>{const o=before.find(x=>x.id===s.id);if(!o)return null;const dx=s.x-o.x,dy=s.y-o.y;return (Math.abs(dx)>EPS||Math.abs(dy)>EPS)?`${s.name}: x ${o.x.toFixed(1)}→${s.x.toFixed(1)}, y ${o.y.toFixed(1)}→${s.y.toFixed(1)}`:null;}).filter(Boolean);
         $("optimizerSummary").textContent=`Aplicada la mejor solución: ${best.moved} pilas movidas · ${saved.toFixed(1)}\" menos de largo.${moveDetails.length?" "+moveDetails.slice(0,3).join(" · "):""}`;
         this.renderSolutions(solutions,beforeUsed);
         this.toast(best.moved?`IA movió ${best.moved} pila${best.moved===1?"":"s"}`:"La carga ya estaba en la mejor posición encontrada");
@@ -122,7 +122,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"4.1",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"4.2",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
     async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
     renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
     render(){
