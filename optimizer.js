@@ -318,6 +318,82 @@ export class LoadEngine {
     return candidates;
   }
 
+
+  deepRebuildRescue(placed,unplaced,originals){
+    // Reconstrucción amplia: cuando faltan 1–2 pilas, permite abandonar temporalmente
+    // una solución local buena y rehacer entre 25 % y 85 % de las pilas móviles.
+    // La solución original siempre permanece como candidata fuera de este método.
+    const missing=(unplaced||[]).map(Geometry.clone);
+    if(!missing.length||missing.length>2)return [];
+    const movable=placed.filter(s=>!s.locked);
+    if(movable.length<4)return [];
+    const used=Math.max(1,Geometry.usedLength(placed));
+    const candidates=[], removalSets=[];
+    const fractions=[0.25,0.40,0.60,0.75,0.85];
+    const byEnd=[...movable].sort((a,b)=>(b.y+b.l)-(a.y+a.l));
+    const byArea=[...movable].sort((a,b)=>b.w*b.l-a.w*a.l||(b.y+b.l)-(a.y+a.l));
+    const bySmall=[...movable].sort((a,b)=>a.w*a.l-b.w*b.l||(b.y+b.l)-(a.y+a.l));
+
+    for(const fraction of fractions){
+      const count=Math.max(4,Math.min(movable.length,Math.ceil(movable.length*fraction)));
+      removalSets.push(byEnd.slice(0,count));
+      removalSets.push(byArea.slice(0,count));
+      removalSets.push(bySmall.slice(0,count));
+      const depth=used*fraction;
+      const rearZone=movable.filter(s=>s.y+s.l>=used-depth);
+      if(rearZone.length>=4)removalSets.push(rearZone);
+    }
+    // Último recurso: reconstrucción global de todas las pilas no bloqueadas.
+    removalSets.push(movable);
+
+    const seenSets=new Set();
+    for(const removedList of removalSets){
+      if(!this.hasTime())break;
+      const ids=[...new Set(removedList.map(s=>s.id))];
+      if(ids.length<4)continue;
+      const setKey=ids.slice().sort().join('|');
+      if(seenSets.has(setKey))continue;
+      seenSets.add(setKey);
+      const removed=new Set(ids);
+      const base=placed.filter(s=>s.locked||!removed.has(s.id));
+      if(!validateLayout(base,this.trailer).ok)continue;
+      const removedPieces=placed.filter(s=>removed.has(s.id));
+      const pending=[...missing,...removedPieces];
+
+      // Las tres primeras rutas son deliberadamente distintas, no retoques del mismo plano.
+      const distinctOrders=[
+        [...missing,...removedPieces].sort((a,b)=>{
+          const am=missing.some(m=>m.id===a.id)?0:1,bm=missing.some(m=>m.id===b.id)?0:1;
+          return am-bm||b.w*b.l-a.w*a.l||b.l-a.l;
+        }),
+        [...pending].sort((a,b)=>a.w*a.l-b.w*b.l||a.l-b.l),
+        [...pending].sort((a,b)=>b.l-a.l||a.w-b.w),
+        [...pending].sort((a,b)=>b.w-a.w||a.l-b.l),
+        ...this.rowCombinationOrders(pending),
+        ...this.orders(pending).slice(0,10)
+      ];
+      const seenOrders=new Set();
+      for(const order of distinctOrders){
+        if(!this.hasTime())break;
+        const key=order.map(s=>s.id).join('|');
+        if(seenOrders.has(key))continue;
+        seenOrders.add(key);
+        const beam=pending.length>28?320:pending.length>18?460:620;
+        const result=this.packPartial(order,base,originals,beam);
+        if(!result||!validateLayout(result.stacks,this.trailer).ok)continue;
+        const placedIds=new Set(result.stacks.map(s=>s.id));
+        const stillMissing=originals.filter(s=>!placedIds.has(s.id));
+        candidates.push({
+          name:`Reconstrucción profunda (${ids.length} pilas rearmadas)`,
+          stacks:result.stacks,
+          unplaced:stillMissing
+        });
+        if(!stillMissing.length)return candidates;
+      }
+    }
+    return candidates;
+  }
+
   patternSeeds(input){
     const seeds=[];
     for(const pattern of this.patterns){
@@ -419,7 +495,7 @@ export class LoadEngine {
       }
     }
 
-    // Antes de reconstrucciones generales, intenta rescatar específicamente las últimas 1–3 pilas
+    // Antes de reconstrucciones generales, intenta rescatar específicamente las últimas 1–2 pilas
     // desde la mejor carga parcial disponible. La solución anterior permanece entre los candidatos.
     if(this.hasTime()){
       const partialSeeds=solutions.map(s=>{
@@ -431,7 +507,12 @@ export class LoadEngine {
         .sort((a,b)=>b.pallets-a.pallets||b.s.stacks.length-a.s.stacks.length);
       if(partialSeeds.length){
         const best=partialSeeds[0];
-        for(const rescued of this.lastMileRescue(best.s.stacks,best.missing,input))solutions.push(rescued);
+        const localRescues=this.lastMileRescue(best.s.stacks,best.missing,input);
+        for(const rescued of localRescues)solutions.push(rescued);
+        const localSolved=localRescues.some(r=>(r.unplaced||[]).length===0);
+        if(!localSolved&&this.hasTime()){
+          for(const rebuilt of this.deepRebuildRescue(best.s.stacks,best.missing,input))solutions.push(rebuilt);
+        }
       }
     }
 
