@@ -105,10 +105,11 @@ const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, 
 const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
 
 class LoadEngine {
-  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[]}={}){
+  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[],seedOffset=0}={}){
     this.trailer=Geometry.clone(trailer);
     this.patterns=Array.isArray(patterns)?Geometry.clone(patterns):[];
     this.strategies=Array.isArray(strategies)?Geometry.clone(strategies):[];
+    this.seedOffset=Number(seedOffset)||0;
     this.deadline=Date.now()+timeLimitMs;
     this.timedOut=false;
   }
@@ -151,7 +152,7 @@ class LoadEngine {
       [...movable].sort((a,b)=>a.y-b.y||a.x-b.x),
       [...movable].sort((a,b)=>(isFourWay(b)?1:0)-(isFourWay(a)?1:0)||b.w*b.l-a.w*a.l)
     ];
-    let seed=2166136261;
+    let seed=(2166136261 ^ ((this.seedOffset+1)*2654435761))>>>0;
     for(const s of movable)for(const ch of String(s.id))seed=(seed^ch.charCodeAt(0))*16777619>>>0;
     const rnd=()=>((seed=1664525*seed+1013904223>>>0)/4294967296);
     const randomOrders=movable.length>28?2:movable.length>18?4:8;
@@ -548,6 +549,22 @@ const $ = id => document.getElementById(id);
 const clone = value => JSON.parse(JSON.stringify(value));
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 
+function normalizeLibraryItem(raw={}){
+  const number=(...values)=>{for(const value of values){const n=Number(value);if(Number.isFinite(n)&&n>0)return n;}return 0;};
+  const w=number(raw.w,raw.width,raw.ancho,raw.palletWidth);
+  const l=number(raw.l,raw.length,raw.largo,raw.palletLength);
+  const maxHeight=number(raw.maxHeight,raw.max,raw.altura,raw.height,raw.stackMax)||20;
+  return {
+    ...raw,
+    id:raw.id||uid(),
+    name:String(raw.name||raw.nombre||`${l||'?'}×${w||'?'}`),
+    w,l,maxHeight,
+    type:raw.type||raw.tipo||'4-way',
+    category:raw.category||raw.categoria||'Otra',
+    canRotate:raw.canRotate!==false&&raw.canRotate!=='false'
+  };
+}
+
 
   const PATTERN_STORAGE_KEY = "loadmaster-visual-patterns-v1";
 
@@ -595,11 +612,15 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
     constructor(){
       this.state={trailer:{width:96,length:628},stacks:[],pending:[],library:[],selectedId:null};
       this.history=[]; this.future=[];
-      try{this.state.library=JSON.parse(localStorage.getItem("loadmaster-library")||"[]");}catch{}
+      try{
+        const saved=JSON.parse(localStorage.getItem("loadmaster-library")||"[]");
+        this.state.library=Array.isArray(saved)?saved.map(normalizeLibraryItem):[];
+        this.persistLibrary();
+      }catch{}
     }
     snapshot(){return JSON.stringify(this.state);}
     remember(){this.history.push(this.snapshot()); if(this.history.length>80)this.history.shift(); this.future=[];}
-    restore(raw){this.state=JSON.parse(raw);this.state.pending=this.state.pending||[]; this.persistLibrary();}
+    restore(raw){this.state=JSON.parse(raw);this.state.pending=this.state.pending||[];this.state.library=(this.state.library||[]).map(normalizeLibraryItem);this.persistLibrary();}
     persistLibrary(){localStorage.setItem("loadmaster-library",JSON.stringify(this.state.library));}
   }
 
@@ -682,11 +703,18 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       if(!this.patternMemory.patterns.length)root.innerHTML='<div class="patternDetected">Todavía no hay patrones confirmados.</div>';
     }
     loadLibrarySelection(){
-      const item=this.state.library.find(x=>x.id===$("librarySelect").value); if(!item)return;
-      $("palletWidth").value=item.w;$("palletLength").value=item.l;$("maxHeight").value=item.maxHeight;$("palletType").value=item.type;$("category").value=item.category;$("canRotate").checked=item.canRotate;$("palletName").value=item.name;$("libraryAutofillStatus").textContent=`✓ Autocompletado: ${item.l} largo × ${item.w} ancho · altura ${item.maxHeight}`;this.toast("Medida y altura autocompletadas");
+      const index=this.state.library.findIndex(x=>String(x.id)===String($("librarySelect").value));if(index<0)return;
+      const item=normalizeLibraryItem(this.state.library[index]);this.state.library[index]=item;this.store.persistLibrary();
+      const status=$("libraryAutofillStatus");
+      if(!(item.w>0&&item.l>0)){
+        $("palletWidth").value="";$("palletLength").value="";
+        status.textContent="⚠ Esta medida guardada no contiene largo y ancho válidos. Escríbelos una vez y vuelve a guardarla.";
+        this.toast("La medida guardada necesita largo y ancho");return;
+      }
+      $("palletWidth").value=item.w;$("palletLength").value=item.l;$("maxHeight").value=item.maxHeight;$("palletType").value=item.type;$("category").value=item.category;$("canRotate").checked=item.canRotate;$("palletName").value=item.name;status.textContent=`✓ Pallet autocompletado: ${item.l} largo × ${item.w} ancho · altura ${item.maxHeight}`;this.toast("Pallet autocompletado");
     }
     saveLibraryItem(){
-      const item={id:uid(),name:$("palletName").value.trim()||"Pallet",w:+$("palletWidth").value,l:+$("palletLength").value,maxHeight:+$("maxHeight").value,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked};
+      const item=normalizeLibraryItem({id:uid(),name:$("palletName").value.trim()||"Pallet",w:+$("palletWidth").value,l:+$("palletLength").value,maxHeight:+$("maxHeight").value,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked});
       this.state.library.push(item);this.store.persistLibrary();this.renderLibrary();this.toast("Medida guardada");
     }
     splitQty(total,max){const r=[];while(total>0){const n=Math.min(total,max);r.push(n);total-=n;}return r;}
@@ -751,11 +779,19 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
         if(!fastBest||!fastBest.unplacedStacks){this.toast("Optimización terminada");return;}
         $("optimizerSummary").textContent+=` · Búsqueda profunda activa hasta 30 segundos…`;
         setTimeout(()=>{
-          const deep=new LoadEngine(this.state.trailer,{timeLimitMs:21000,patterns:[],strategies:this.strategyMemory.items});const deepReport=deep.optimize(original);
-          if(!deepReport.ok)return;
-          const candidates=[...(fastReport.solutions||[]),...(deepReport.solutions||[])];
+          const candidates=[...(fastReport.solutions||[])];
+          // Tres reintentos internos distintos: reproducen automáticamente la mejora
+          // que antes aparecía solo al pulsar “Reintentar”. Cada intento usa otra semilla.
+          for(let attempt=1;attempt<=3;attempt++){
+            const deep=new LoadEngine(this.state.trailer,{timeLimitMs:7000,patterns:[],strategies:this.strategyMemory.items,seedOffset:attempt});
+            const report=deep.optimize(original);
+            if(report.ok)candidates.push(...(report.solutions||[]));
+            candidates.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
+            if(candidates[0]&&candidates[0].unplacedStacks===0)break;
+          }
+          if(!candidates.length)return;
           candidates.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
-          const merged={ok:true,solutions:candidates.slice(0,3)};const deepBest=applyReport(merged,"Resultado final (búsqueda 9→30 s)");
+          const merged={ok:true,solutions:candidates.slice(0,3)};const deepBest=applyReport(merged,"Resultado final (9 s + reintentos automáticos hasta 30 s)");
           this.toast(deepBest&&deepBest.unplacedStacks?"Se conservó la mayor carga encontrada; revisa Pendientes":"Toda la carga quedó acomodada");
         },50);
       },30);
@@ -776,7 +812,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       this.syncTrailerInputs();this.render();
     }
     saveFile(){const blob=new Blob([JSON.stringify({version:"5.2",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.2.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-    async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.pending=d.pending||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
+    async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.pending=d.pending||[];this.state.library=(d.library||this.state.library).map(normalizeLibraryItem);this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
     renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
     render(){
       const trailer=$("trailer");trailer.style.width=`${this.state.trailer.width*SCALE}px`;trailer.style.height=`${this.state.trailer.length*SCALE}px`;trailer.querySelectorAll(".stack").forEach(n=>n.remove());

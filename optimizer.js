@@ -7,10 +7,11 @@ const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, 
 const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
 
 export class LoadEngine {
-  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[]}={}){
+  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[],seedOffset=0}={}){
     this.trailer=Geometry.clone(trailer);
     this.patterns=Array.isArray(patterns)?Geometry.clone(patterns):[];
     this.strategies=Array.isArray(strategies)?Geometry.clone(strategies):[];
+    this.seedOffset=Number(seedOffset)||0;
     this.deadline=Date.now()+timeLimitMs;
     this.timedOut=false;
   }
@@ -53,7 +54,7 @@ export class LoadEngine {
       [...movable].sort((a,b)=>a.y-b.y||a.x-b.x),
       [...movable].sort((a,b)=>(isFourWay(b)?1:0)-(isFourWay(a)?1:0)||b.w*b.l-a.w*a.l)
     ];
-    let seed=2166136261;
+    let seed=(2166136261 ^ ((this.seedOffset+1)*2654435761))>>>0;
     for(const s of movable)for(const ch of String(s.id))seed=(seed^ch.charCodeAt(0))*16777619>>>0;
     const rnd=()=>((seed=1664525*seed+1013904223>>>0)/4294967296);
     const randomOrders=movable.length>28?2:movable.length>18?4:8;
