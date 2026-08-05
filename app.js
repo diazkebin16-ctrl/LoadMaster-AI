@@ -8,7 +8,7 @@
   const $ = id => document.getElementById(id);
   const trailerEl = $("trailer");
   const state = {
-    trailer:{width:96,length:300},
+    trailer:{width:96,length:628},
     stacks:[],
     library:[],
     selectedId:null,
@@ -429,21 +429,28 @@
 
   $("compactBtn").addEventListener("click",()=>{
     remember();
-    state.stacks.filter(s=>!s.locked).sort((a,b)=>a.y-b.y).forEach(s=>{
-      let steps=0;
-      const maxSteps=Math.max(1,Math.ceil(state.trailer.length)+5);
-      while(s.y>0 && steps<maxSteps){
-        const oldY=s.y;
-        s.y=Math.max(0,s.y-1);
-        if(!valid(s)){
-          s.y=oldY;
-          break;
+    let moved=true;
+    while(moved){
+      moved=false;
+      state.stacks.filter(s=>!s.locked).sort((a,b)=>a.y-b.y||a.x-b.x).forEach(s=>{
+        while(s.y>0){
+          const oy=s.y; s.y=Math.max(0,s.y-1);
+          if(!valid(s)){s.y=oy;break;}
+          moved=true;
         }
-        if(s.y===oldY) break;
-        steps++;
-      }
-      snapStack(s);
-    });
+        while(s.x>0){
+          const ox=s.x; s.x=Math.max(0,s.x-1);
+          if(!valid(s)){s.x=ox;break;}
+          moved=true;
+        }
+        while(s.y>0){
+          const oy=s.y; s.y=Math.max(0,s.y-1);
+          if(!valid(s)){s.y=oy;break;}
+          moved=true;
+        }
+        snapStack(s);
+      });
+    }
     render();toast("Carga compactada");
   });
   $("clearBtn").addEventListener("click",()=>{
