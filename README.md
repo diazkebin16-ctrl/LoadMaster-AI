@@ -13,3 +13,9 @@ Correcciones:
 ## Actualización
 Sube los siete archivos a la raíz de LoadMaster-AI, reemplaza los anteriores
 y realiza un commit.
+
+
+## v0.9
+- Tráiler predeterminado: 96×628 pulgadas.
+- Compactación avanzada: recoloca pilas desbloqueadas, prueba varios órdenes y gira únicamente pilas 4-way autorizadas.
+- Respeta pilas bloqueadas y selecciona el acomodo con menor largo utilizado.

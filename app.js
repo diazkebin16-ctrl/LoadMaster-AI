@@ -427,32 +427,102 @@
   }
   $("optimizeBtn").addEventListener("click",optimize);
 
-  $("compactBtn").addEventListener("click",()=>{
-    remember();
-    let moved=true;
-    while(moved){
-      moved=false;
-      state.stacks.filter(s=>!s.locked).sort((a,b)=>a.y-b.y||a.x-b.x).forEach(s=>{
-        while(s.y>0){
-          const oy=s.y; s.y=Math.max(0,s.y-1);
-          if(!valid(s)){s.y=oy;break;}
-          moved=true;
-        }
-        while(s.x>0){
-          const ox=s.x; s.x=Math.max(0,s.x-1);
-          if(!valid(s)){s.x=ox;break;}
-          moved=true;
-        }
-        while(s.y>0){
-          const oy=s.y; s.y=Math.max(0,s.y-1);
-          if(!valid(s)){s.y=oy;break;}
-          moved=true;
-        }
-        snapStack(s);
+  function layoutUsedLength(stacks){
+    return stacks.length ? Math.max(...stacks.map(s=>s.y+s.l)) : 0;
+  }
+
+  function layoutOverlaps(a,b){
+    return !(a.x+a.w<=b.x || b.x+b.w<=a.x || a.y+a.l<=b.y || b.y+b.l<=a.y);
+  }
+
+  function layoutValid(s,placed){
+    if(s.x<0||s.y<0||s.x+s.w>state.trailer.width||s.y+s.l>state.trailer.length) return false;
+    return !placed.some(o=>o.id!==s.id&&layoutOverlaps(s,o));
+  }
+
+  function layoutCandidates(w,l,placed,id){
+    const xs=new Set([0,state.trailer.width-w]);
+    const ys=new Set([0]);
+    placed.forEach(o=>{
+      xs.add(o.x);
+      xs.add(o.x+o.w);
+      xs.add(o.x-w);
+      xs.add(o.x+o.w-w);
+      ys.add(o.y);
+      ys.add(o.y+o.l);
+      ys.add(o.y-l);
+      ys.add(o.y+o.l-l);
+    });
+    const out=[];
+    [...ys].filter(y=>y>=0).sort((a,b)=>a-b).forEach(y=>{
+      [...xs].filter(x=>x>=0).sort((a,b)=>a-b).forEach(x=>{
+        const t={id,x,y,w,l};
+        if(layoutValid(t,placed)) out.push(t);
       });
+    });
+    return out;
+  }
+
+  function compactAdvanced(){
+    const before=snapShot();
+    const locked=state.stacks.filter(s=>s.locked).map(s=>({...s}));
+    const moving=state.stacks.filter(s=>!s.locked).map(s=>({...s}));
+    if(!moving.length) return toast("No hay pilas desbloqueadas para compactar");
+
+    const orders=[
+      arr=>[...arr].sort((a,b)=>(b.w*b.l)-(a.w*a.l)||b.l-a.l||b.w-a.w),
+      arr=>[...arr].sort((a,b)=>b.l-a.l||b.w-a.w),
+      arr=>[...arr].sort((a,b)=>b.w-a.w||b.l-a.l),
+      arr=>[...arr].sort((a,b)=>a.y-b.y||a.x-b.x),
+      arr=>[...arr].sort((a,b)=>(b.w+b.l)-(a.w+a.l))
+    ];
+
+    let best=null;
+    orders.forEach(makeOrder=>{
+      const placed=locked.map(s=>({...s}));
+      const failed=[];
+      makeOrder(moving).forEach(original=>{
+        const orientations=[{w:original.w,l:original.l}];
+        if(original.type==="4-way"&&original.canRotate&&original.w!==original.l){
+          orientations.push({w:original.l,l:original.w});
+        }
+        let choice=null;
+        orientations.forEach(o=>{
+          layoutCandidates(o.w,o.l,placed,original.id).forEach(pos=>{
+            const candidate={...original,...o,x:pos.x,y:pos.y};
+            const projected=Math.max(layoutUsedLength(placed),candidate.y+candidate.l);
+            const sideGap=Math.min(candidate.x,state.trailer.width-(candidate.x+candidate.w));
+            const score=[projected,candidate.y,sideGap,candidate.x];
+            if(!choice||score.some((v,i)=>v<choice.score[i]&&score.slice(0,i).every((x,j)=>x===choice.score[j]))){
+              choice={candidate,score};
+            }
+          });
+        });
+        if(choice) placed.push(choice.candidate);
+        else failed.push(original);
+      });
+
+      // Si alguna pila no pudo colocarse, conservarla para no perder información.
+      failed.forEach(s=>placed.push({...s}));
+      const conflicts=placed.filter((s,i)=>!layoutValid(s,placed.filter((_,j)=>j!==i))).length;
+      const used=layoutUsedLength(placed.filter(s=>s.x>=0&&s.y>=0&&s.x+s.w<=state.trailer.width&&s.y+s.l<=state.trailer.length));
+      const result={placed,conflicts,used};
+      if(!best||result.conflicts<best.conflicts||(result.conflicts===best.conflicts&&result.used<best.used)) best=result;
+    });
+
+    state.history.push(before);
+    if(state.history.length>80) state.history.shift();
+    state.future=[];
+    state.stacks=best.placed;
+    render();
+    if(best.conflicts){
+      toast(`Compactación terminada con ${best.conflicts} conflicto(s)`);
+    }else{
+      toast(`Compactación avanzada: ${Math.round(best.used)} pulgadas usadas`);
     }
-    render();toast("Carga compactada");
-  });
+  }
+
+  $("compactBtn").addEventListener("click",compactAdvanced);
   $("clearBtn").addEventListener("click",()=>{
     if(!confirm("¿Vaciar toda la carga?"))return;remember();state.stacks=[];state.selectedId=null;render();
   });

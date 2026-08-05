@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 0.7</title>
+  <title>LoadMaster AI 0.9</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,7 +12,7 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>La IA que aprende a cargar como tú. · v0.7</p>
+    <p>La IA que aprende a cargar como tú. · v0.9</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
@@ -28,7 +28,7 @@
           <option value="95x574">95×574</option>
           <option value="96x574">96×574</option>
           <option value="95x628">95×628</option>
-          <option value="96x628">96×628</option>
+          <option value="96x628" selected>96×628</option>
           <option value="98x628">98×628</option>
           <option value="custom">Personalizado</option>
         </select>
@@ -38,7 +38,7 @@
           <input id="trailerWidth" type="number" min="1" value="96">
         </label>
         <label>Largo (pulg.)
-          <input id="trailerLength" type="number" min="1" value="300">
+          <input id="trailerLength" type="number" min="1" value="628">
         </label>
       </div>
       <button id="applyTrailer">Aplicar</button>
@@ -130,7 +130,7 @@
       <div><span>Pilas</span><strong id="metricStacks">0</strong></div>
       <div><span>Pallets</span><strong id="metricPallets">0</strong></div>
       <div><span>Largo usado</span><strong id="metricUsed">0"</strong></div>
-      <div><span>Libre al final</span><strong id="metricFree">300"</strong></div>
+      <div><span>Libre al final</span><strong id="metricFree">628"</strong></div>
       <div class="wide"><span>Estado</span><strong id="metricStatus">Carga válida</strong></div>
     </section>
   </aside>
