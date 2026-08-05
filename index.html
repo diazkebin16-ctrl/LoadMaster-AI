@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI</title>
+  <title>LoadMaster AI 0.2</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,7 +12,7 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>La IA que aprende a cargar como tú.</p>
+    <p>Versión 0.2 · Editor táctil corregido</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
@@ -101,6 +101,19 @@
         <button id="lockBtn">Bloquear</button>
         <button id="duplicateBtn">Duplicar</button>
         <button id="deleteBtn">Eliminar</button>
+      </div>
+      <div class="nudgePanel">
+        <span>Mover con precisión</span>
+        <div class="nudgeGrid">
+          <span></span><button id="moveUpBtn" aria-label="Mover arriba">↑</button><span></span>
+          <button id="moveLeftBtn" aria-label="Mover izquierda">←</button><button id="moveDownBtn" aria-label="Mover abajo">↓</button><button id="moveRightBtn" aria-label="Mover derecha">→</button>
+        </div>
+        <label>Paso
+          <select id="moveStep">
+            <option value="1">1 pulgada</option>
+            <option value="5">5 pulgadas</option>
+          </select>
+        </label>
       </div>
     </section>
 

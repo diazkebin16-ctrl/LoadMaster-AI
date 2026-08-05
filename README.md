@@ -1,6 +1,6 @@
-# LoadMaster AI v1
+# LoadMaster AI v0.2
 
-Primera versión funcional para Android, tablet y computadora.
+Actualización del editor táctil para Android, tablet y computadora.
 
 ## Funciones incluidas
 - Tráilers guardados: 96×300, 96×330, 95×574, 96×574, 95×628, 96×628 y 98×628.
@@ -35,3 +35,13 @@ Después:
 Esta es la versión 1. El optimizador es práctico pero todavía no es el motor avanzado
 que probará miles de combinaciones, OCR, voz, aprendizaje y nube. Esas funciones se
 agregarán sobre esta base después de probar el editor real.
+
+
+## Correcciones de la versión 0.2
+- Arrastre táctil corregido: ya no se destruye el elemento al tocarlo.
+- Selección estable de cualquier pila.
+- Giro de cualquier pila 4-way; si no cabe en el sitio actual, intenta reubicarla.
+- Movimiento fino con botones de 1 o 5 pulgadas.
+- Duplicado solo cuando existe espacio válido.
+- Mejor manejo de pointercancel y pérdida de captura táctil.
+- Caché PWA actualizado para forzar la nueva versión.

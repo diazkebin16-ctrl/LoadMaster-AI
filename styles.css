@@ -56,3 +56,10 @@ border:4px solid #111827;touch-action:none;user-select:none}
   .workspaceTop{align-items:flex-start;flex-direction:column}
   .canvasWrap{max-height:none}
 }
+
+.nudgePanel{margin-top:.8rem;padding-top:.8rem;border-top:1px solid #e5e7eb}
+.nudgePanel>span{display:block;font-size:.82rem;color:var(--muted);margin-bottom:.5rem}
+.nudgeGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;margin-bottom:.55rem}
+.nudgeGrid button{padding:.55rem;font-size:1.1rem;font-weight:700}
+.stack.dragging{opacity:.88;z-index:20;cursor:grabbing;outline:3px solid var(--accent)}
+.stack{will-change:left,top}

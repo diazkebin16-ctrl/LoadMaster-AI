@@ -115,6 +115,7 @@
     state.stacks.forEach(s=>{
       const el=document.createElement("div");
       el.className="stack";
+      el.dataset.id=s.id;
       if(s.id===state.selectedId) el.classList.add("selected");
       if(s.locked) el.classList.add("locked");
       if(!valid(s)) el.classList.add("invalid");
@@ -145,32 +146,83 @@
     const p=edgePoints(s); s.x=nearest(s.x,p.xs); s.y=nearest(s.y,p.ys);
   }
 
+  function selectStack(id){
+    state.selectedId=id;
+    trailerEl.querySelectorAll(".stack").forEach(node=>{
+      node.classList.toggle("selected",node.dataset.id===id);
+    });
+    updateSelected();
+  }
+
   function wireDrag(el,s){
-    let dragging=false,startX=0,startY=0,original=null;
+    el.dataset.id=s.id;
+    let dragging=false;
+    let moved=false;
+    let startX=0,startY=0;
+    let original=null;
+    let historyBefore=null;
+    let activePointer=null;
+
     el.addEventListener("pointerdown",e=>{
-      e.preventDefault(); state.selectedId=s.id; render();
-      if(s.locked) return;
-      dragging=true; original={x:s.x,y:s.y}; startX=e.clientX; startY=e.clientY;
-      el.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      e.stopPropagation();
+      selectStack(s.id);
+      if(s.locked){toast("Esta pila está bloqueada");return;}
+
+      dragging=true;
+      moved=false;
+      activePointer=e.pointerId;
+      original={x:s.x,y:s.y};
+      historyBefore=snapShot();
+      startX=e.clientX;
+      startY=e.clientY;
+      el.classList.add("dragging");
+      try{el.setPointerCapture(e.pointerId);}catch{}
     });
+
     el.addEventListener("pointermove",e=>{
-      if(!dragging) return;
-      s.x=Math.round(original.x+(e.clientX-startX)/SCALE);
-      s.y=Math.round(original.y+(e.clientY-startY)/SCALE);
-      el.style.left=`${s.x*SCALE}px`; el.style.top=`${s.y*SCALE}px`;
-      el.classList.toggle("invalid",!valid(s)); updateMetrics();
+      if(!dragging||e.pointerId!==activePointer)return;
+      e.preventDefault();
+      const dx=(e.clientX-startX)/SCALE;
+      const dy=(e.clientY-startY)/SCALE;
+      if(Math.abs(dx)>1||Math.abs(dy)>1)moved=true;
+      s.x=Math.round(original.x+dx);
+      s.y=Math.round(original.y+dy);
+      el.style.left=`${s.x*SCALE}px`;
+      el.style.top=`${s.y*SCALE}px`;
+      el.classList.toggle("invalid",!valid(s));
+      updateMetrics();
     });
-    el.addEventListener("pointerup",()=>{
-      if(!dragging) return; dragging=false; snapStack(s);
-      if(!valid(s)){s.x=original.x;s.y=original.y;toast("Ese espacio no es válido");}
-      else{
-        const before=JSON.parse(snapShot());
-        before.stacks=before.stacks.map(o=>o.id===s.id?{...o,x:original.x,y:original.y}:o);
-        state.history.push(JSON.stringify(before)); state.future=[];
+
+    function finishDrag(cancelled=false){
+      if(!dragging)return;
+      dragging=false;
+      el.classList.remove("dragging");
+
+      if(cancelled){
+        s.x=original.x;s.y=original.y;
+      }else if(moved){
+        snapStack(s);
+        if(!valid(s)){
+          s.x=original.x;s.y=original.y;
+          toast("Ese espacio no es válido");
+        }else{
+          state.history.push(historyBefore);
+          if(state.history.length>80)state.history.shift();
+          state.future=[];
+        }
       }
+      activePointer=null;
       render();
+    }
+
+    el.addEventListener("pointerup",e=>{
+      if(e.pointerId===activePointer)finishDrag(false);
     });
-    el.addEventListener("click",()=>{state.selectedId=s.id;render();});
+    el.addEventListener("pointercancel",()=>finishDrag(true));
+    el.addEventListener("lostpointercapture",()=>{
+      if(dragging)finishDrag(false);
+    });
   }
 
   function candidatePositions(w,l,ignore=null){
@@ -238,10 +290,24 @@
 
   $("rotateBtn").addEventListener("click",()=>{
     const s=selected(); if(!s) return toast("Selecciona una pila");
-    if(s.type==="2-way"||!s.canRotate) return toast("Esta pila no se puede girar");
-    remember(); [s.w,s.l]=[s.l,s.w];
-    if(!valid(s)){[s.w,s.l]=[s.l,s.w];toast("No cabe girada en esa posición");}
-    render();
+    if(s.type==="2-way"||!s.canRotate) return toast("Esta pila es 2-way o tiene el giro desactivado");
+    if(s.w===s.l) return toast("Esta pila es cuadrada; girarla no cambia su posición");
+    const before=snapShot();
+    const old={w:s.w,l:s.l,x:s.x,y:s.y};
+    [s.w,s.l]=[s.l,s.w];
+    if(!valid(s)){
+      const fits=candidatePositions(s.w,s.l,s.id);
+      if(fits.length){
+        fits.sort((a,b)=>Math.abs(a.x-old.x)+Math.abs(a.y-old.y)-Math.abs(b.x-old.x)-Math.abs(b.y-old.y));
+        s.x=fits[0].x;s.y=fits[0].y;
+        toast("Pila girada y reubicada automáticamente");
+      }else{
+        Object.assign(s,old);
+        toast("No existe espacio válido para girarla");
+        render();return;
+      }
+    }
+    state.history.push(before);state.future=[];render();
   });
   $("lockBtn").addEventListener("click",()=>{
     const s=selected();if(!s)return toast("Selecciona una pila");
@@ -249,13 +315,33 @@
   });
   $("duplicateBtn").addEventListener("click",()=>{
     const s=selected();if(!s)return toast("Selecciona una pila");
-    remember();const fit=candidatePositions(s.w,s.l)[0];
-    state.stacks.push({...s,id:uid(),locked:false,x:fit?fit.x:0,y:fit?fit.y:usedLength()});render();
+    const fit=candidatePositions(s.w,s.l)[0];
+    if(!fit)return toast("No hay espacio válido para duplicarla");
+    remember();
+    const copy={...s,id:uid(),locked:false,x:fit.x,y:fit.y};
+    state.stacks.push(copy);state.selectedId=copy.id;render();
   });
   $("deleteBtn").addEventListener("click",()=>{
     if(!state.selectedId)return;remember();
     state.stacks=state.stacks.filter(s=>s.id!==state.selectedId);state.selectedId=null;render();
   });
+
+  function nudgeSelected(dx,dy){
+    const s=selected();if(!s)return toast("Selecciona una pila");
+    if(s.locked)return toast("Desbloquea la pila para moverla");
+    const before=snapShot();
+    const ox=s.x,oy=s.y;
+    s.x+=dx;s.y+=dy;
+    if(!valid(s)){
+      s.x=ox;s.y=oy;toast("No puede moverse hacia ahí");return;
+    }
+    state.history.push(before);state.future=[];render();
+  }
+  function moveStep(){return +$("moveStep").value||1;}
+  $("moveUpBtn").addEventListener("click",()=>nudgeSelected(0,-moveStep()));
+  $("moveDownBtn").addEventListener("click",()=>nudgeSelected(0,moveStep()));
+  $("moveLeftBtn").addEventListener("click",()=>nudgeSelected(-moveStep(),0));
+  $("moveRightBtn").addEventListener("click",()=>nudgeSelected(moveStep(),0));
 
   $("undoBtn").addEventListener("click",()=>{
     if(!state.history.length)return;state.future.push(snapShot());restore(state.history.pop());
