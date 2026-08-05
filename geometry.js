@@ -33,6 +33,7 @@ export class Geometry {
     }
     return {xs:[...xs].filter(x=>x>=-EPS&&x+shape.w<=t.width+EPS).sort((a,b)=>a-b),ys:[...ys].filter(y=>y>=-EPS&&y+shape.l<=t.length+EPS).sort((a,b)=>a-b)};
   }
+  static candidateAxes(shape,placed,t) { return Geometry.axes(shape,placed,t); }
   static candidates(shape,placed,t) {
     const {xs,ys}=Geometry.axes(shape,placed,t), out=[];
     for(const y of ys)for(const x of xs){const c={...shape,x,y};if(Geometry.valid(c,placed,t))out.push(c);}
