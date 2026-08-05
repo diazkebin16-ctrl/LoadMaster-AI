@@ -1,3 +1,3 @@
-LoadMaster AI v4.3
+LoadMaster AI v4.4
 
-Versión funcional sin imports de módulos. Todos los controles y el motor están integrados en app.js para evitar fallos de carga de la carpeta engine en GitHub Pages/PWA.
+Añade reparación progresiva: conserva las pilas válidas y recoloca únicamente las que están fuera o en conflicto, probando movimientos y rotaciones permitidas.

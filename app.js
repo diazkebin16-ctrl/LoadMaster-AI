@@ -250,6 +250,56 @@ class LoadEngine {
     return validateLayout(final,this.trailer).ok?final:layout;
   }
 
+  repairLayout(input){
+    // Conserva primero las pilas que ya están válidas dentro del tráiler.
+    // Las que están fuera o en conflicto se vuelven a colocar una por una,
+    // probando también la rotación permitida.
+    const fixed=[];
+    const pending=[];
+    const ordered=[...input].sort((a,b)=>(a.locked?0:1)-(b.locked?0:1)||a.y-b.y||a.x-b.x);
+    for(const s of ordered){
+      if(Geometry.valid(s,fixed,this.trailer)) fixed.push(Geometry.clone(s));
+      else pending.push(Geometry.clone(s));
+    }
+    if(!pending.length) return Geometry.clone(input);
+
+    // Beam search progresivo: permite que una colocación intermedia no sea
+    // la mejor visualmente, siempre que abra espacio para las siguientes.
+    let beams=[fixed];
+    const pendingOrders=this.orders(pending).slice(0,10);
+    const complete=[];
+    for(const order of pendingOrders){
+      beams=[Geometry.clone(fixed)];
+      let failed=false;
+      for(const piece of order){
+        const next=[];
+        for(const placed of beams){
+          const opts=this.placementOptions(piece,placed,96);
+          for(const c of opts) next.push([...placed,c]);
+        }
+        if(!next.length){failed=true;break;}
+        next.sort((a,b)=>layoutScore(a,this.trailer,input)-layoutScore(b,this.trailer,input));
+        const unique=[],seen=new Set();
+        for(const layout of next){
+          const key=layout.map(x=>`${x.id}:${x.x},${x.y},${x.w},${x.l}`).sort().join('|');
+          if(seen.has(key))continue;
+          seen.add(key);unique.push(layout);
+          if(unique.length>=220)break;
+        }
+        beams=unique;
+      }
+      if(!failed){
+        for(const candidate of beams.slice(0,20)){
+          const polished=this.sequenceRefine(candidate,input,10);
+          if(validateLayout(polished,this.trailer).ok) complete.push(polished);
+        }
+      }
+    }
+    if(!complete.length) return null;
+    complete.sort((a,b)=>layoutScore(a,this.trailer,input)-layoutScore(b,this.trailer,input));
+    return complete[0];
+  }
+
   optimize(input){
     const locked=input.filter(s=>s.locked), movable=input.filter(s=>!s.locked);
     const lockedCheck=validateLayout(locked,this.trailer);
@@ -261,6 +311,14 @@ class LoadEngine {
     }
 
     const solutions=[];
+
+    // Modo reparación: útil cuando el usuario ya hizo casi todo el acomodo
+    // y solo quedan algunas pilas rojas fuera o en conflicto.
+    const repaired=this.repairLayout(input);
+    if(repaired&&validateLayout(repaired,this.trailer).ok){
+      solutions.push({name:'Reparación progresiva',stacks:repaired});
+    }
+
     if(validateLayout(input,this.trailer).ok){
       const local=this.sequenceRefine(input,input,10);
       if(validateLayout(local,this.trailer).ok)solutions.push({name:'Ajuste con rotaciones',stacks:local});
@@ -405,7 +463,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"4.2",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"4.4",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
     async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
     renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
     render(){
