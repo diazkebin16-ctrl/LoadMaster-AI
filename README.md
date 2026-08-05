@@ -1,12 +1,13 @@
-# LoadMaster AI v2.1 — Fase 2 completa
+# LoadMaster AI v3.0 — Fase 2
 
-Motor inteligente de optimización con búsqueda global y refinamiento local.
+Reescritura completa del núcleo de la aplicación.
 
-Cambios principales:
+- Motor geométrico independiente de la interfaz.
+- Compactación local exacta.
+- Optimización global con búsqueda por alternativas.
+- Rotación solo cuando está permitida.
+- Respeto de pilas bloqueadas.
+- Comparación antes/después y soluciones alternativas.
 - Tráiler predeterminado 96 × 628.
-- Optimización global con varias órdenes y rotaciones permitidas.
-- Refinamiento automático de desviaciones pequeñas: alinea pilas con bordes y vecinas.
-- La mejor solución se aplica automáticamente y se puede deshacer.
-- Hasta tres soluciones comparables.
-- Respeta pilas bloqueadas, 2-way y restricciones de giro.
-- Caché PWA actualizada a v2.1.
+
+Abra `index.html` o publique la carpeta en GitHub Pages.

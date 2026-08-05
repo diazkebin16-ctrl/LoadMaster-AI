@@ -1,845 +1,312 @@
 (() => {
+  "use strict";
+
   const SCALE = 1.05;
-  const presets = {
-    "96x300":[96,300],"96x330":[96,330],"95x574":[95,574],"96x574":[96,574],
-    "95x628":[95,628],"96x628":[96,628],"98x628":[98,628]
+  const EPS = 1e-6;
+  const PRESETS = {
+    "96x628":[96,628], "96x300":[96,300], "96x330":[96,330],
+    "95x574":[95,574], "96x574":[96,574], "95x628":[95,628], "98x628":[98,628]
   };
-
   const $ = id => document.getElementById(id);
-  const trailerEl = $("trailer");
-  const state = {
-    trailer:{width:96,length:628},
-    stacks:[],
-    library:[],
-    selectedId:null,
-    history:[],
-    future:[]
-  };
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  const clamp = (n,min,max) => Math.max(min,Math.min(max,n));
+  const roundQuarter = n => Math.round(n*4)/4;
 
-  const savedLibrary = localStorage.getItem("loadmaster-library");
-  if (savedLibrary) {
-    try { state.library = JSON.parse(savedLibrary); } catch {}
-  }
-
-  let installPrompt = null;
-  window.addEventListener("beforeinstallprompt", e => {
-    e.preventDefault(); installPrompt = e; $("installBtn").hidden = false;
-  });
-  $("installBtn").addEventListener("click", async () => {
-    if (!installPrompt) return;
-    installPrompt.prompt(); await installPrompt.userChoice;
-    installPrompt = null; $("installBtn").hidden = true;
-  });
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
-
-  function toast(msg){
-    $("toast").textContent=msg; $("toast").classList.add("show");
-    setTimeout(()=>$("toast").classList.remove("show"),1800);
-  }
-  function uid(){ return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
-  function snapShot(){ return JSON.stringify({trailer:state.trailer,stacks:state.stacks,library:state.library}); }
-  function remember(){
-    state.history.push(snapShot());
-    if(state.history.length>80) state.history.shift();
-    state.future=[];
-  }
-  function restore(raw){
-    const d=JSON.parse(raw);
-    state.trailer=d.trailer; state.stacks=d.stacks; state.library=d.library||state.library;
-    state.selectedId=null; syncInputs(); saveLibrary(); render();
-  }
-  function saveLibrary(){
-    localStorage.setItem("loadmaster-library",JSON.stringify(state.library));
-    renderLibrary();
-  }
-  function syncInputs(){
-    $("trailerWidth").value=state.trailer.width;
-    $("trailerLength").value=state.trailer.length;
-  }
-
-  function overlaps(a,b){
-    return !(a.x+a.w<=b.x || b.x+b.w<=a.x || a.y+a.l<=b.y || b.y+b.l<=a.y);
-  }
-  function valid(s,ignore=s.id){
-    if(s.x<0||s.y<0||s.x+s.w>state.trailer.width||s.y+s.l>state.trailer.length) return false;
-    return !state.stacks.some(o=>o.id!==ignore&&overlaps(s,o));
-  }
-  function usedLength(){
-    const insideEnds=state.stacks
-      .filter(s=>s.y < state.trailer.length && s.x < state.trailer.width && s.x+s.w > 0 && s.y+s.l > 0)
-      .map(s=>Math.min(state.trailer.length,Math.max(0,s.y+s.l)));
-    return insideEnds.length ? Math.max(...insideEnds) : 0;
-  }
-  function selected(){ return state.stacks.find(s=>s.id===state.selectedId); }
-
-  function updateFloatingTools(){
-    const tools=$("floatingTools");
-    const s=selected();
-    if(!tools||!s){
-      if(tools) tools.hidden=true;
-      return;
+  class Geometry {
+    static overlaps(a,b) {
+      return !(a.x+a.w <= b.x+EPS || b.x+b.w <= a.x+EPS || a.y+a.l <= b.y+EPS || b.y+b.l <= a.y+EPS);
     }
-    tools.hidden=false;
-
-    const name=$("bottomSelectedName");
-    if(name) name.textContent=`${s.name} · ${s.qty} alto · ${s.type}`;
-
-    const rotate=$("floatRotateBtn");
-    const lock=$("floatLockBtn");
-    if(rotate){
-      const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;
-      rotate.disabled=!can;
-      rotate.title=can?"Girar pila":"Esta pila no se puede girar";
+    static inside(s,trailer) {
+      return s.x >= -EPS && s.y >= -EPS && s.x+s.w <= trailer.width+EPS && s.y+s.l <= trailer.length+EPS;
     }
-    if(lock){
-      lock.textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";
-      lock.title=s.locked?"Desbloquear":"Bloquear";
+    static valid(s,placed,trailer,ignoreId=null) {
+      return Geometry.inside(s,trailer) && !placed.some(o => o.id!==ignoreId && Geometry.overlaps(s,o));
     }
-  }
-
-  function splitQty(total,max){
-    const result=[];
-    while(total>0){ const n=Math.min(max,total); result.push(n); total-=n; }
-    return result;
-  }
-
-  function renderLibrary(){
-    const sel=$("librarySelect");
-    const current=sel.value;
-    sel.innerHTML='<option value="">— Nueva medida —</option>';
-    state.library.forEach(item=>{
-      const o=document.createElement("option");
-      o.value=item.id; o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;
-      sel.appendChild(o);
-    });
-    if([...sel.options].some(o=>o.value===current)) sel.value=current;
-  }
-
-  function updateSelected(){
-    const s=selected();
-    $("selectedInfo").textContent=s
-      ? `${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${s.locked?" · bloqueada":""}`
-      : "Ninguna seleccionada";
-  }
-
-  function updateMetrics(){
-    const used=usedLength();
-    const free=Math.max(0,state.trailer.length-used);
-    $("metricStacks").textContent=state.stacks.length;
-    $("metricPallets").textContent=state.stacks.reduce((a,s)=>a+s.qty,0);
-    $("metricUsed").textContent=`${Math.round(used)}"`;
-    $("metricFree").textContent=`${Math.round(free)}"`;
-    const floorArea=state.stacks.reduce((sum,s)=>sum+s.w*s.l,0);
-    const trailerArea=Math.max(1,state.trailer.width*state.trailer.length);
-    const usedEnvelope=Math.max(1,state.trailer.width*used);
-    const util=Math.min(100,(floorArea/trailerArea)*100);
-    const efficiency=used?Math.min(100,(floorArea/usedEnvelope)*100):0;
-    const utilEl=$("metricUtilization"), effEl=$("metricEfficiency");
-    if(utilEl) utilEl.textContent=`${util.toFixed(1)}%`;
-    if(effEl) effEl.textContent=`${efficiency.toFixed(1)}%`;
-    const bad=state.stacks.some(s=>!valid(s));
-    $("metricStatus").textContent=bad?"Hay conflicto":"Carga válida";
-    $("metricStatus").style.color=bad?"#dc2626":"#16a34a";
-    $("freeZone").style.top=`${used*SCALE}px`;
-    $("freeZone").style.height=`${free*SCALE}px`;
-  }
-
-  function render(){
-    trailerEl.style.width=`${state.trailer.width*SCALE}px`;
-    trailerEl.style.height=`${state.trailer.length*SCALE}px`;
-    [...trailerEl.querySelectorAll(".stack")].forEach(n=>n.remove());
-    state.stacks.forEach(s=>{
-      const el=document.createElement("div");
-      el.className="stack";
-      el.dataset.id=s.id;
-      if(s.id===state.selectedId) el.classList.add("selected");
-      if(s.locked) el.classList.add("locked");
-      if(!valid(s)) el.classList.add("invalid");
-      el.style.left=`${s.x*SCALE}px`; el.style.top=`${s.y*SCALE}px`;
-      el.style.width=`${s.w*SCALE}px`; el.style.height=`${s.l*SCALE}px`;
-      el.innerHTML=`${s.name}<small>${s.qty} alto · ${s.type}</small>`;
-      trailerEl.appendChild(el);
-      wireDrag(el,s);
-    });
-    updateSelected(); updateMetrics(); renderLibrary(); updateFloatingTools();
-  }
-
-  function edgePoints(s){
-    const xs=[0,state.trailer.width-s.w],ys=[0,state.trailer.length-s.l];
-    state.stacks.forEach(o=>{
-      if(o.id===s.id) return;
-      xs.push(o.x,o.x+o.w,o.x-s.w,o.x+o.w-s.w);
-      ys.push(o.y,o.y+o.l,o.y-s.l,o.y+o.l-s.l);
-    });
-    return {xs,ys};
-  }
-  function nearest(v,arr,d=4){
-    let best=v,dist=d+1;
-    arr.forEach(n=>{const dd=Math.abs(v-n);if(dd<dist){dist=dd;best=n;}});
-    return best;
-  }
-  function snapStack(s){
-    const p=edgePoints(s); s.x=nearest(s.x,p.xs); s.y=nearest(s.y,p.ys);
-  }
-
-  function selectStack(id){
-    state.selectedId=id;
-    trailerEl.querySelectorAll(".stack").forEach(node=>{
-      node.classList.toggle("selected",node.dataset.id===id);
-    });
-    updateSelected();
-  }
-
-  function wireDrag(el,s){
-    el.dataset.id=s.id;
-    let dragging=false;
-    let moved=false;
-    let startX=0,startY=0;
-    let original=null;
-    let historyBefore=null;
-    let activePointer=null;
-
-    el.addEventListener("pointerdown",e=>{
-      e.preventDefault();
-      e.stopPropagation();
-      selectStack(s.id);
-      if(s.locked){toast("Esta pila está bloqueada");return;}
-
-      dragging=true;
-      moved=false;
-      activePointer=e.pointerId;
-      original={x:s.x,y:s.y};
-      historyBefore=snapShot();
-      startX=e.clientX;
-      startY=e.clientY;
-      el.classList.add("dragging");
-      try{el.setPointerCapture(e.pointerId);}catch{}
-    });
-
-    el.addEventListener("pointermove",e=>{
-      if(!dragging||e.pointerId!==activePointer)return;
-      e.preventDefault();
-      const dx=(e.clientX-startX)/SCALE;
-      const dy=(e.clientY-startY)/SCALE;
-      if(Math.abs(dx)>1||Math.abs(dy)>1)moved=true;
-      s.x=Math.round(original.x+dx);
-      s.y=Math.round(original.y+dy);
-      el.style.left=`${s.x*SCALE}px`;
-      el.style.top=`${s.y*SCALE}px`;
-      el.classList.toggle("invalid",!valid(s));
-      updateMetrics();
-    });
-
-    function finishDrag(cancelled=false){
-      if(!dragging)return;
-      dragging=false;
-      el.classList.remove("dragging");
-
-      if(cancelled){
-        s.x=original.x;s.y=original.y;
-      }else if(moved){
-        // En modo editor libre la pila puede quedar fuera del tráiler
-        // o temporalmente encima de otra. El color rojo indica conflicto.
-        snapStack(s);
-        state.history.push(historyBefore);
-        if(state.history.length>80)state.history.shift();
-        state.future=[];
-        if(!valid(s)) toast("Pila fuera o en conflicto; puedes seguir acomodándola");
-      }
-      activePointer=null;
-      render();
+    static usedLength(stacks) {
+      return stacks.length ? Math.max(...stacks.map(s=>s.y+s.l)) : 0;
     }
-
-    el.addEventListener("pointerup",e=>{
-      if(e.pointerId===activePointer)finishDrag(false);
-    });
-    el.addEventListener("pointercancel",()=>finishDrag(true));
-    el.addEventListener("lostpointercapture",()=>{
-      if(dragging)finishDrag(false);
-    });
-  }
-
-  function candidatePositions(w,l,ignore=null){
-    const xs=new Set([0]),ys=new Set([0]);
-    state.stacks.forEach(s=>{
-      if(s.id===ignore) return;
-      xs.add(s.x); xs.add(s.x+s.w); ys.add(s.y); ys.add(s.y+s.l);
-    });
-    const out=[];
-    [...ys].sort((a,b)=>a-b).forEach(y=>{
-      [...xs].sort((a,b)=>a-b).forEach(x=>{
-        const t={id:ignore||"new",x,y,w,l};
-        if(valid(t,ignore||"new")) out.push(t);
+    static floorArea(stacks) { return stacks.reduce((sum,s)=>sum+s.w*s.l,0); }
+    static contactScore(s,others,trailer) {
+      let score=0;
+      if (Math.abs(s.x) < EPS || Math.abs(s.x+s.w-trailer.width)<EPS) score += s.l;
+      if (Math.abs(s.y)<EPS) score += s.w;
+      others.forEach(o=>{
+        const verticalOverlap=Math.max(0,Math.min(s.y+s.l,o.y+o.l)-Math.max(s.y,o.y));
+        const horizontalOverlap=Math.max(0,Math.min(s.x+s.w,o.x+o.w)-Math.max(s.x,o.x));
+        if(Math.abs(s.x+s.w-o.x)<EPS || Math.abs(o.x+o.w-s.x)<EPS) score += verticalOverlap;
+        if(Math.abs(s.y+s.l-o.y)<EPS || Math.abs(o.y+o.l-s.y)<EPS) score += horizontalOverlap;
       });
-    });
-    return out.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||a.y-b.y||a.x-b.x);
-  }
-
-  function addLibraryEntry(){
-    const entry={
-      id:uid(),name:$("palletName").value.trim()||`${$("palletWidth").value}×${$("palletLength").value}`,
-      width:+$("palletWidth").value,length:+$("palletLength").value,
-      maxHeight:+$("maxHeight").value,type:$("palletType").value,
-      category:$("category").value,canRotate:$("canRotate").checked
-    };
-    const same=state.library.findIndex(x=>x.name===entry.name&&x.category===entry.category);
-    if(same>=0) state.library[same]={...state.library[same],...entry,id:state.library[same].id};
-    else state.library.push(entry);
-    saveLibrary(); toast("Medida guardada en la biblioteca");
-  }
-
-
-
-
-
-  let backgroundPointerStart=null;
-  trailerEl.addEventListener("pointerdown",e=>{
-    if(e.target===trailerEl || e.target.classList.contains("freeZone")){
-      backgroundPointerStart={x:e.clientX,y:e.clientY};
-    }else{
-      backgroundPointerStart=null;
+      return score;
     }
-  },{passive:true});
-  trailerEl.addEventListener("pointerup",e=>{
-    if(!backgroundPointerStart) return;
-    const moved=Math.hypot(
-      e.clientX-backgroundPointerStart.x,
-      e.clientY-backgroundPointerStart.y
-    );
-    backgroundPointerStart=null;
-    if(moved<6){
-      state.selectedId=null;
-      render();
-    }
-  },{passive:true});
-
-  $("floatRotateBtn").addEventListener("click",()=>{
-    $("rotateBtn").click();
-  });
-  $("floatLockBtn").addEventListener("click",()=>{
-    $("lockBtn").click();
-  });
-  $("floatDeleteBtn").addEventListener("click",()=>{
-    $("deleteBtn").click();
-  });
-
-  $("trailerPreset").addEventListener("change",()=>{
-    const v=$("trailerPreset").value;
-    if(v!=="custom"){[$("trailerWidth").value,$("trailerLength").value]=presets[v];}
-  });
-  $("applyTrailer").addEventListener("click",()=>{
-    remember(); state.trailer={width:+$("trailerWidth").value,length:+$("trailerLength").value}; render();
-  });
-  $("librarySelect").addEventListener("change",()=>{
-    const item=state.library.find(x=>x.id===$("librarySelect").value); if(!item) return;
-    $("palletWidth").value=item.width;$("palletLength").value=item.length;
-    $("maxHeight").value=item.maxHeight;$("palletType").value=item.type;
-    $("category").value=item.category;$("canRotate").checked=item.canRotate;
-    $("palletName").value=item.name;
-  });
-  $("saveLibrary").addEventListener("click",addLibraryEntry);
-
-  $("addPallet").addEventListener("click",()=>{
-    const total=+$("palletQty").value,max=+$("maxHeight").value;
-    if(total<1||max<1) return;
-    remember();
-    const groups=splitQty(total,max);
-    groups.forEach(q=>{
-      const w=+$("palletWidth").value,l=+$("palletLength").value;
-      const fit=candidatePositions(w,l)[0];
-      state.stacks.push({
-        id:uid(),name:$("palletName").value.trim()||`${w}×${l}`,
-        w,l,qty:q,type:$("palletType").value,category:$("category").value,
-        canRotate:$("canRotate").checked,locked:false,
-        x:fit?fit.x:0,y:fit?fit.y:usedLength()
+    static candidateAxes(stack,placed,trailer) {
+      const xs = new Set([0, trailer.width-stack.w]);
+      const ys = new Set([0]);
+      placed.forEach(o=>{
+        [o.x, o.x+o.w, o.x-stack.w, o.x+o.w-stack.w].forEach(v=>xs.add(roundQuarter(v)));
+        [o.y, o.y+o.l, o.y-stack.l, o.y+o.l-stack.l].forEach(v=>ys.add(roundQuarter(v)));
       });
-    });
-    render(); toast(`${groups.length} pila(s) creada(s)`);
-  });
-
-  $("rotateBtn").addEventListener("click",()=>{
-    const s=selected(); if(!s) return toast("Selecciona una pila");
-    if(s.type==="2-way"||!s.canRotate) return toast("Esta pila es 2-way o tiene el giro desactivado");
-    if(s.w===s.l) return toast("Esta pila es cuadrada; girarla no cambia sus medidas");
-    const before=snapShot();
-    [s.w,s.l]=[s.l,s.w];
-    state.history.push(before);
-    if(state.history.length>80) state.history.shift();
-    state.future=[];
-    render();
-    if(!valid(s)) toast("Pila girada; quedó fuera o en conflicto");
-    else toast("Pila girada");
-  });
-  $("lockBtn").addEventListener("click",()=>{
-    const s=selected();if(!s)return toast("Selecciona una pila");
-    remember();s.locked=!s.locked;render();
-  });
-  $("duplicateBtn").addEventListener("click",()=>{
-    const s=selected();if(!s)return toast("Selecciona una pila");
-    const fit=candidatePositions(s.w,s.l)[0];
-    if(!fit)return toast("No hay espacio válido para duplicarla");
-    remember();
-    const copy={...s,id:uid(),locked:false,x:fit.x,y:fit.y};
-    state.stacks.push(copy);state.selectedId=copy.id;render();
-  });
-  $("deleteBtn").addEventListener("click",()=>{
-    if(!state.selectedId)return;remember();
-    state.stacks=state.stacks.filter(s=>s.id!==state.selectedId);state.selectedId=null;render();
-  });
-
-  function nudgeSelected(dx,dy){
-    const s=selected();if(!s)return toast("Selecciona una pila");
-    if(s.locked)return toast("Desbloquea la pila para moverla");
-    const before=snapShot();
-    s.x+=dx;s.y+=dy;
-    state.history.push(before);
-    if(state.history.length>80) state.history.shift();
-    state.future=[];
-    render();
-    if(!valid(s)) toast("Pila fuera o en conflicto");
-  }
-  function moveStep(){return +$("moveStep").value||1;}
-  $("moveUpBtn").addEventListener("click",()=>nudgeSelected(0,-moveStep()));
-  $("moveDownBtn").addEventListener("click",()=>nudgeSelected(0,moveStep()));
-  $("moveLeftBtn").addEventListener("click",()=>nudgeSelected(-moveStep(),0));
-  $("moveRightBtn").addEventListener("click",()=>nudgeSelected(moveStep(),0));
-
-  $("undoBtn").addEventListener("click",()=>{
-    if(!state.history.length)return;state.future.push(snapShot());restore(state.history.pop());
-  });
-  $("redoBtn").addEventListener("click",()=>{
-    if(!state.future.length)return;state.history.push(snapShot());restore(state.future.pop());
-  });
-
-  // FASE 2 — Motor inteligente de optimización.
-  // Genera varias soluciones completas, respeta bloqueos y rotación, y compara
-  // largo usado, huecos internos y movimiento total respecto al plano actual.
-  let optimizerSolutions=[];
-
-  function cloneStack(s){ return {...s}; }
-  function layoutUsed(items){ return items.length?Math.max(...items.map(p=>p.y+p.l)):0; }
-  function layoutArea(items){ return items.reduce((sum,p)=>sum+p.w*p.l,0); }
-  function layoutValid(items){
-    for(let i=0;i<items.length;i++){
-      const a=items[i];
-      if(a.x<0||a.y<0||a.x+a.w>state.trailer.width||a.y+a.l>state.trailer.length)return false;
-      for(let j=i+1;j<items.length;j++) if(localOverlaps(a,items[j])) return false;
+      return {
+        xs:[...xs].filter(x=>x>=-EPS && x+stack.w<=trailer.width+EPS).sort((a,b)=>a-b),
+        ys:[...ys].filter(y=>y>=-EPS && y+stack.l<=trailer.length+EPS).sort((a,b)=>a-b)
+      };
     }
-    return true;
-  }
-  function solutionStats(items){
-    const used=layoutUsed(items);
-    const area=layoutArea(items);
-    const free=Math.max(0,state.trailer.length-used);
-    const utilization=100*area/Math.max(1,state.trailer.width*state.trailer.length);
-    const efficiency=used?100*area/(state.trailer.width*used):0;
-    return {used,free,utilization,efficiency};
-  }
-  function placementKey(items){
-    return [...items].sort((a,b)=>String(a.id).localeCompare(String(b.id)))
-      .map(p=>`${p.id}:${p.x},${p.y},${p.w},${p.l}`).join('|');
-  }
-  function candidateCorners(w,l,placed){
-    const xs=new Set([0,state.trailer.width-w]);
-    const ys=new Set([0]);
-    placed.forEach(p=>{
-      xs.add(p.x); xs.add(p.x+p.w); xs.add(p.x-w); xs.add(p.x+p.w-w);
-      ys.add(p.y); ys.add(p.y+p.l); ys.add(p.y-l); ys.add(p.y+p.l-l);
-    });
-    const out=[];
-    for(const y0 of ys){
-      for(const x0 of xs){
-        const x=Math.round(x0*100)/100, y=Math.round(y0*100)/100;
-        const piece={x,y,w,l};
-        if(fitsPlacement(piece,placed)) out.push(piece);
-      }
-    }
-    out.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||a.y-b.y||a.x-b.x);
-    return out.slice(0,36);
-  }
-  function sharedEdgeContact(a,b){
-    let contact=0;
-    const verticalOverlap=Math.max(0,Math.min(a.y+a.l,b.y+b.l)-Math.max(a.y,b.y));
-    const horizontalOverlap=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
-    if(Math.abs((a.x+a.w)-b.x)<0.01 || Math.abs((b.x+b.w)-a.x)<0.01) contact+=verticalOverlap;
-    if(Math.abs((a.y+a.l)-b.y)<0.01 || Math.abs((b.y+b.l)-a.y)<0.01) contact+=horizontalOverlap;
-    return contact;
-  }
-  function layoutContact(items){
-    let contact=0;
-    for(const p of items){
-      if(Math.abs(p.x)<0.01) contact+=p.l*0.7;
-      if(Math.abs((p.x+p.w)-state.trailer.width)<0.01) contact+=p.l*0.9;
-      if(Math.abs(p.y)<0.01) contact+=p.w*0.7;
-    }
-    for(let i=0;i<items.length;i++) for(let j=i+1;j<items.length;j++) contact+=sharedEdgeContact(items[i],items[j]);
-    return contact;
-  }
-  function smartScore(placed, originalById){
-    const used=layoutUsed(placed);
-    const area=layoutArea(placed);
-    const empty=Math.max(0,state.trailer.width*used-area);
-    const contact=layoutContact(placed);
-    let movement=0;
-    placed.forEach(p=>{
-      const o=originalById.get(p.id);
-      if(o) movement+=Math.abs(p.x-o.x)+Math.abs(p.y-o.y)+(p.w!==o.w?4:0);
-    });
-    // Prioridad: menor largo; después menos hueco, más contacto/alineación y menor movimiento.
-    return used*1e9 + empty*1e4 - contact*250 + movement;
-  }
-
-  function refinementPositions(piece,others){
-    const xs=new Set([0,state.trailer.width-piece.w,piece.x]);
-    const ys=new Set([0,state.trailer.length-piece.l,piece.y]);
-    for(const o of others){
-      xs.add(o.x); xs.add(o.x+o.w); xs.add(o.x-piece.w); xs.add(o.x+o.w-piece.w);
-      ys.add(o.y); ys.add(o.y+o.l); ys.add(o.y-piece.l); ys.add(o.y+o.l-piece.l);
-    }
-    const out=[];
-    for(const y0 of ys) for(const x0 of xs){
-      const x=Math.round(x0*100)/100,y=Math.round(y0*100)/100;
-      const candidate={...piece,x,y};
-      if(x<0||y<0||x+piece.w>state.trailer.width||y+piece.l>state.trailer.length)continue;
-      if(!others.some(o=>localOverlaps(candidate,o)))out.push(candidate);
-    }
-    return out;
-  }
-  function refineLayout(input,originalById,deadline=Infinity){
-    let items=input.map(cloneStack), movedIds=new Set(), passes=0;
-    let currentScore=smartScore(items,originalById);
-    let improved=true;
-    while(improved && passes<10 && performance.now()<deadline){
-      improved=false;passes++;
-      const order=[...items].sort((a,b)=>(b.y+b.l)-(a.y+a.l)||b.x-a.x);
-      for(const source of order){
-        if(source.locked||performance.now()>deadline)continue;
-        const idx=items.findIndex(p=>p.id===source.id);
-        const others=items.filter(p=>p.id!==source.id);
-        let best=items[idx],bestScore=currentScore;
-        for(const c of refinementPositions(items[idx],others)){
-          const trial=[...others,c];
-          const score=smartScore(trial,originalById);
-          if(score<bestScore-0.001){best=c;bestScore=score;}
-        }
-        if(best.x!==items[idx].x||best.y!==items[idx].y){
-          movedIds.add(source.id);items[idx]=best;currentScore=bestScore;improved=true;
+    static candidates(stack,placed,trailer) {
+      const axes=Geometry.candidateAxes(stack,placed,trailer);
+      const out=[];
+      for(const y of axes.ys){
+        for(const x of axes.xs){
+          const c={...stack,x:roundQuarter(x),y:roundQuarter(y)};
+          if(Geometry.valid(c,placed,trailer)) out.push(c);
         }
       }
+      return out;
     }
-    return {items,score:currentScore,moved:movedIds.size,passes,stats:solutionStats(items)};
   }
-  function seededShuffle(items,seed){
-    const a=[...items]; let x=seed>>>0;
-    for(let i=a.length-1;i>0;i--){
-      x=(1664525*x+1013904223)>>>0;
-      const j=x%(i+1); [a[i],a[j]]=[a[j],a[i]];
+
+  class LoadEngine {
+    constructor(trailer){ this.trailer=clone(trailer); }
+    orientations(s){
+      const list=[{w:s.w,l:s.l,rotated:!!s.rotated}];
+      if(s.type==="4-way" && s.canRotate && Math.abs(s.w-s.l)>EPS){
+        list.push({w:s.l,l:s.w,rotated:!s.rotated});
+      }
+      return list;
     }
-    return a;
-  }
-  function intelligentOrders(items){
-    const candidates=[
-      [...items].sort((a,b)=>(b.w*b.l)-(a.w*a.l)),
-      [...items].sort((a,b)=>b.l-a.l||b.w-a.w),
-      [...items].sort((a,b)=>b.w-a.w||b.l-a.l),
-      [...items].sort((a,b)=>Math.max(b.w,b.l)-Math.max(a.w,a.l)),
-      [...items].sort((a,b)=>a.y-b.y||a.x-b.x)
-    ];
-    for(let seed=1;seed<=18;seed++) candidates.push(seededShuffle(items,seed*7919));
-    const seen=new Set();
-    return candidates.filter(order=>{const k=order.map(x=>x.id).join('|');if(seen.has(k))return false;seen.add(k);return true;});
-  }
-  function beamPack(order,locked,deadline,originalById){
-    let beam=[{placed:locked.map(cloneStack),moves:[],score:0}];
-    const width=order.length<=12?180:order.length<=24?110:65;
-    for(const source of order){
-      if(performance.now()>deadline) return null;
-      const next=[];
-      const orientations=[{w:source.w,l:source.l}];
-      if(source.type==='4-way'&&source.canRotate&&source.w!==source.l) orientations.push({w:source.l,l:source.w});
-      for(const node of beam){
-        for(const o of orientations){
-          for(const pos of candidateCorners(o.w,o.l,node.placed)){
-            const piece={...source,x:pos.x,y:pos.y,w:o.w,l:o.l};
-            const placed=[...node.placed,piece];
-            next.push({placed,moves:[...node.moves,piece],score:smartScore(placed,originalById)});
+    score(stacks, originals=null){
+      const used=Geometry.usedLength(stacks);
+      const area=Geometry.floorArea(stacks);
+      const envelope=Math.max(1,this.trailer.width*used);
+      const waste=envelope-area;
+      const contacts=stacks.reduce((sum,s)=>sum+Geometry.contactScore(s,stacks.filter(o=>o.id!==s.id),this.trailer),0);
+      let movement=0;
+      if(originals){
+        const map=new Map(originals.map(s=>[s.id,s]));
+        stacks.forEach(s=>{ const o=map.get(s.id); if(o) movement+=Math.abs(s.x-o.x)+Math.abs(s.y-o.y); });
+      }
+      return used*1e8 + waste*1e3 - contacts*10 + movement*0.01;
+    }
+    localPolish(input){
+      let stacks=clone(input);
+      const locked=stacks.filter(s=>s.locked);
+      const movable=stacks.filter(s=>!s.locked);
+      let changed=true, passes=0;
+      while(changed && passes<12){
+        changed=false; passes++;
+        movable.sort((a,b)=>(a.y+a.l)-(b.y+b.l) || a.x-b.x);
+        for(const s of movable){
+          const others=stacks.filter(o=>o.id!==s.id);
+          const before={...s};
+          const axes=Geometry.candidateAxes(s,others,this.trailer);
+          const candidates=[];
+          for(const x of axes.xs){
+            const c={...s,x,y:s.y}; if(Geometry.valid(c,others,this.trailer)) candidates.push(c);
+          }
+          for(const y of axes.ys){
+            const c={...s,x:s.x,y}; if(Geometry.valid(c,others,this.trailer)) candidates.push(c);
+          }
+          for(const c of Geometry.candidates(s,others,this.trailer)) candidates.push(c);
+          let best=before;
+          let bestKey=this.localKey(before,others,before);
+          for(const c of candidates){
+            const key=this.localKey(c,others,before);
+            if(key<bestKey-EPS){ best=c; bestKey=key; }
+          }
+          if(Math.abs(best.x-s.x)>EPS || Math.abs(best.y-s.y)>EPS){
+            Object.assign(s,best); changed=true;
           }
         }
       }
-      if(!next.length)return null;
-      next.sort((a,b)=>a.score-b.score);
-      const unique=[], keys=new Set();
-      for(const n of next){
-        const k=n.moves.map(p=>`${p.x},${p.y},${p.w},${p.l}`).join(';');
-        if(keys.has(k))continue; keys.add(k); unique.push(n);
-        if(unique.length>=width)break;
+      return stacks;
+    }
+    localKey(c,others,origin){
+      const used=Math.max(c.y+c.l,...others.map(o=>o.y+o.l),0);
+      const contact=Geometry.contactScore(c,others,this.trailer);
+      const move=Math.abs(c.x-origin.x)+Math.abs(c.y-origin.y);
+      // Largo primero, luego más contacto. Distancia rompe empates y hace que una pila cercana a la pared derecha vaya a esa pared.
+      return used*1e8 - contact*1e3 + move;
+    }
+    orderVariants(stacks){
+      const base=clone(stacks);
+      const variants=[];
+      const add=arr=>variants.push(arr.map(s=>s.id));
+      add([...base].sort((a,b)=>b.w*b.l-a.w*a.l));
+      add([...base].sort((a,b)=>b.l-a.l || b.w-a.w));
+      add([...base].sort((a,b)=>b.w-a.w || b.l-a.l));
+      add([...base].sort((a,b)=>(b.w+b.l)-(a.w+a.l)));
+      add([...base].sort((a,b)=>a.y-b.y || a.x-b.x));
+      for(let i=0;i<8;i++){
+        const shuffled=[...base];
+        for(let j=shuffled.length-1;j>0;j--){ const k=Math.floor(Math.random()*(j+1)); [shuffled[j],shuffled[k]]=[shuffled[k],shuffled[j]]; }
+        add(shuffled);
       }
-      beam=unique;
+      return variants;
     }
-    beam.sort((a,b)=>a.score-b.score);
-    return beam[0]||null;
-  }
-  function feasibilityCheck(){
-    const badSize=state.stacks.find(s=>{
-      const normal=s.w<=state.trailer.width&&s.l<=state.trailer.length;
-      const rotated=s.type==='4-way'&&s.canRotate&&s.l<=state.trailer.width&&s.w<=state.trailer.length;
-      return !normal&&!rotated;
-    });
-    if(badSize)return `La pila ${badSize.name} no cabe por sus dimensiones.`;
-    const totalArea=layoutArea(state.stacks);
-    if(totalArea>state.trailer.width*state.trailer.length)return 'La carga supera el área total disponible del tráiler.';
-    const locked=state.stacks.filter(s=>s.locked);
-    if(!layoutValid(locked))return 'Las pilas bloqueadas están fuera del tráiler o se superponen.';
-    return null;
-  }
-  async function runIntelligentOptimizer(){
-    const problem=feasibilityCheck();
-    if(problem){toast(problem);return;}
-    const panel=$("optimizerPanel"), results=$("optimizerResults"), summary=$("optimizerSummary");
-    panel.hidden=false; results.innerHTML=''; summary.textContent='Analizando órdenes, rotaciones y espacios disponibles…';
-    document.body.classList.add('optimizing');
-    await new Promise(r=>setTimeout(r,40));
-    const locked=state.stacks.filter(s=>s.locked).map(cloneStack);
-    const moving=state.stacks.filter(s=>!s.locked).map(cloneStack);
-    const originalById=new Map(state.stacks.map(s=>[s.id,s]));
-    const deadline=performance.now()+Math.min(8000,2200+moving.length*180);
-    const found=[], keys=new Set();
-    // Primero corrige desviaciones pequeñas del plano actual (ajuste local de 1 pieza).
-    const refinedCurrent=refineLayout(state.stacks,originalById,deadline);
-    if(layoutValid(refinedCurrent.items)){
-      const key=placementKey(refinedCurrent.items);keys.add(key);
-      found.push({items:refinedCurrent.items,score:refinedCurrent.score,stats:refinedCurrent.stats,refinedMoves:refinedCurrent.moved});
+    packByOrder(allStacks,orderIds,beamWidth=55){
+      const locked=clone(allStacks.filter(s=>s.locked));
+      if(locked.some((s,i)=>!Geometry.valid(s,locked.slice(0,i),this.trailer))) return null;
+      const source=new Map(allStacks.filter(s=>!s.locked).map(s=>[s.id,s]));
+      let beams=[locked];
+      for(const id of orderIds){
+        const original=source.get(id); if(!original) continue;
+        const next=[];
+        for(const placed of beams){
+          for(const orient of this.orientations(original)){
+            const shape={...original,...orient,x:0,y:0};
+            const candidates=Geometry.candidates(shape,placed,this.trailer).slice(0,160);
+            for(const c of candidates) next.push([...placed,c]);
+          }
+        }
+        if(!next.length) return null;
+        next.sort((a,b)=>this.score(a,allStacks)-this.score(b,allStacks));
+        const unique=[]; const seen=new Set();
+        for(const layout of next){
+          const key=layout.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join("|");
+          if(!seen.has(key)){seen.add(key);unique.push(layout);}
+          if(unique.length>=beamWidth) break;
+        }
+        beams=unique;
+      }
+      const best=beams.sort((a,b)=>this.score(a,allStacks)-this.score(b,allStacks))[0];
+      return best ? this.localPolish(best) : null;
     }
-    for(const order of intelligentOrders(moving)){
-      if(performance.now()>deadline)break;
-      const node=beamPack(order,locked,deadline,originalById);
-      if(!node)continue;
-      const all=node.placed;
-      if(all.length!==state.stacks.length||!layoutValid(all))continue;
-      // Refinamiento final: elimina pequeñas desviaciones y alinea cada pila con bordes/vecinos.
-      const refined=refineLayout(all,originalById,deadline);
-      const finalItems=refined.items;
-      const key=placementKey(finalItems);if(keys.has(key))continue;keys.add(key);
-      found.push({items:finalItems,score:refined.score,stats:refined.stats,refinedMoves:refined.moved});
-      found.sort((a,b)=>a.score-b.score);
-      if(found.length>8)found.length=8;
-    }
-    document.body.classList.remove('optimizing');
-    if(!found.length){summary.textContent='No se encontró un acomodo completo válido.';toast('La carga no pudo acomodarse automáticamente');return;}
-    optimizerSolutions=found.slice(0,3);
-    const beforeItems=state.stacks.map(cloneStack);
-    const current=solutionStats(beforeItems);
-    const bestSolution=optimizerSolutions[0];
-    const best=bestSolution.stats;
-    const changed=placementKey(bestSolution.items)!==placementKey(beforeItems);
-    if(changed){
-      remember();
-      const map=new Map(bestSolution.items.map(p=>[p.id,p]));
-      state.stacks.forEach(s=>Object.assign(s,map.get(s.id)||{}));
-      render();
-    }
-    summary.textContent=changed
-      ? `Mejor solución aplicada automáticamente · ${Math.round(best.used)}" usados · ${bestSolution.refinedMoves||0} ajuste(s) fino(s).`
-      : `La carga ya está en la mejor posición encontrada · ${Math.round(best.used)}" usados.`;
-    results.innerHTML='';
-    optimizerSolutions.forEach((sol,i)=>{
-      const card=document.createElement('article');card.className='solutionCard'+(i===0?' best':'');
-      const saved=Math.max(0,current.used-sol.stats.used);
-      card.innerHTML=`<h3>${i===0?'⭐ Mejor solución':`Alternativa ${i+1}`}</h3><div class="solutionStats">
-        <span>Largo usado<strong>${Math.round(sol.stats.used)}"</strong></span>
-        <span>Libre al final<strong>${Math.round(sol.stats.free)}"</strong></span>
-        <span>Eficiencia<strong>${sol.stats.efficiency.toFixed(1)}%</strong></span>
-        <span>Reducción<strong>${Math.round(saved)}"</strong></span>
-        <span>Ajustes finos<strong>${sol.refinedMoves||0}</strong></span>
-      </div><button class="${i===0?'primary':''}" data-solution="${i}">${i===0&&changed?'Aplicada automáticamente':'Aplicar esta solución'}</button>`;
-      results.appendChild(card);
-    });
-    toast(changed?'Optimización aplicada: carga reacomodada':'La carga ya estaba optimizada');
-  }
-  function applyOptimizerSolution(index){
-    const sol=optimizerSolutions[index];if(!sol)return;
-    remember();
-    const map=new Map(sol.items.map(p=>[p.id,p]));
-    state.stacks.forEach(s=>Object.assign(s,map.get(s.id)||{}));
-    render();$("optimizerPanel").hidden=true;toast('Solución aplicada');
-  }
-  $("optimizerResults").addEventListener('click',e=>{
-    const b=e.target.closest('[data-solution]');if(b)applyOptimizerSolution(+b.dataset.solution);
-  });
-  $("closeOptimizer").addEventListener('click',()=>$("optimizerPanel").hidden=true);
-  $("optimizeBtn").addEventListener("click",runIntelligentOptimizer);
-
-  // Motor de compactación avanzada: reconstruye únicamente las pilas desbloqueadas
-  // usando búsqueda por esquinas, varias órdenes de colocación y un beam search limitado.
-  function localOverlaps(a,b){
-    return !(a.x+a.w<=b.x || b.x+b.w<=a.x || a.y+a.l<=b.y || b.y+b.l<=a.y);
-  }
-
-  function fitsPlacement(piece, placed){
-    if(piece.x<0 || piece.y<0 || piece.x+piece.w>state.trailer.width || piece.y+piece.l>state.trailer.length) return false;
-    return !placed.some(other=>localOverlaps(piece,other));
-  }
-
-  function packingCandidates(w,l,placed){
-    const xs=new Set([0]);
-    const ys=new Set([0]);
-    placed.forEach(p=>{
-      xs.add(p.x); xs.add(p.x+p.w);
-      ys.add(p.y); ys.add(p.y+p.l);
-    });
-    const out=[];
-    [...ys].sort((a,b)=>a-b).forEach(y=>{
-      [...xs].sort((a,b)=>a-b).forEach(x=>{
-        const p={x,y,w,l};
-        if(fitsPlacement(p,placed)) out.push(p);
+    optimize(input){
+      const start=this.localPolish(input);
+      const movable=input.filter(s=>!s.locked);
+      const candidates=[{name:"Ajuste exacto",stacks:start}];
+      for(const order of this.orderVariants(movable)){
+        const packed=this.packByOrder(input,order);
+        if(packed) candidates.push({name:"Búsqueda global",stacks:packed});
+      }
+      const unique=[]; const seen=new Set();
+      candidates.forEach(c=>{
+        const key=c.stacks.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join("|");
+        if(!seen.has(key)){seen.add(key); unique.push(c);}
       });
-    });
-    return out.sort((a,b)=>(a.y+a.l)-(b.y+b.l) || a.y-b.y || a.x-b.x).slice(0,24);
-  }
-
-  function packingScore(placed){
-    const used=placed.length ? Math.max(...placed.map(p=>p.y+p.l)) : 0;
-    // Penaliza huecos internos y posiciones laterales sin sacrificar el largo usado.
-    const footprint=placed.reduce((sum,p)=>sum+p.w*p.l,0);
-    const envelope=Math.max(1,state.trailer.width*used);
-    const empty=envelope-footprint;
-    const side=placed.reduce((sum,p)=>sum+p.x,0);
-    return used*100000 + empty*10 + side;
-  }
-
-  function orderVariants(items){
-    const variants=[];
-    const add=arr=>{
-      const key=arr.map(x=>x.id).join('|');
-      if(!variants.some(v=>v.key===key)) variants.push({key,items:arr});
-    };
-    add([...items].sort((a,b)=>(b.w*b.l)-(a.w*a.l)));
-    add([...items].sort((a,b)=>Math.max(b.w,b.l)-Math.max(a.w,a.l) || (b.w*b.l)-(a.w*a.l)));
-    add([...items].sort((a,b)=>b.l-a.l || b.w-a.w));
-    add([...items].sort((a,b)=>b.w-a.w || b.l-a.l));
-    add([...items].sort((a,b)=>a.y-b.y || a.x-b.x));
-    // Variaciones deterministas para escapar de bloqueos locales sin resultados aleatorios.
-    for(let seed=1;seed<=5;seed++){
-      const arr=[...items];
-      for(let i=arr.length-1;i>0;i--){
-        const j=(seed*1103515245 + i*12345)%(i+1);
-        [arr[i],arr[j]]=[arr[j],arr[i]];
-      }
-      add(arr);
-    }
-    return variants.map(v=>v.items);
-  }
-
-  function packInOrder(items,locked){
-    let beam=[{placed:locked.map(p=>({...p})),moves:[]}];
-    const BEAM_WIDTH=90;
-    for(const source of items){
-      const next=[];
-      const orientations=[{w:source.w,l:source.l,rotated:false}];
-      if(source.type==='4-way' && source.canRotate && source.w!==source.l){
-        orientations.push({w:source.l,l:source.w,rotated:true});
-      }
-      beam.forEach(node=>{
-        orientations.forEach(o=>{
-          packingCandidates(o.w,o.l,node.placed).forEach(pos=>{
-            const placedPiece={...source,x:pos.x,y:pos.y,w:o.w,l:o.l};
-            const placed=[...node.placed,placedPiece];
-            next.push({placed,moves:[...node.moves,placedPiece],score:packingScore(placed)});
-          });
-        });
+      unique.forEach(c=>{
+        c.score=this.score(c.stacks,input);
+        c.used=Geometry.usedLength(c.stacks);
+        c.efficiency=Geometry.floorArea(c.stacks)/Math.max(1,this.trailer.width*c.used)*100;
+        c.moved=c.stacks.filter(s=>{const o=input.find(x=>x.id===s.id);return o&&(Math.abs(o.x-s.x)>EPS||Math.abs(o.y-s.y)>EPS||o.w!==s.w||o.l!==s.l);}).length;
       });
-      if(!next.length) return null;
-      next.sort((a,b)=>a.score-b.score);
-      beam=next.slice(0,BEAM_WIDTH);
+      return unique.sort((a,b)=>a.score-b.score).slice(0,3);
     }
-    return beam.sort((a,b)=>a.score-b.score)[0]||null;
   }
 
-  function advancedCompact(){
-    const locked=state.stacks.filter(s=>s.locked);
-    const moving=state.stacks.filter(s=>!s.locked);
-    if(!moving.length) return {ok:true,moved:0,used:usedLength()};
-
-    let best=null;
-    orderVariants(moving).forEach(order=>{
-      const result=packInOrder(order,locked);
-      if(result && (!best || result.score<best.score)) best=result;
-    });
-    if(!best) return {ok:false,moved:0,used:usedLength()};
-
-    const before=new Map(moving.map(s=>[s.id,{x:s.x,y:s.y,w:s.w,l:s.l}]));
-    const byId=new Map(best.moves.map(s=>[s.id,s]));
-    moving.forEach(s=>{
-      const p=byId.get(s.id);
-      s.x=p.x; s.y=p.y; s.w=p.w; s.l=p.l;
-    });
-    const moved=moving.filter(s=>{
-      const b=before.get(s.id);
-      return b.x!==s.x || b.y!==s.y || b.w!==s.w || b.l!==s.l;
-    }).length;
-    return {ok:true,moved,used:usedLength()};
+  class Store {
+    constructor(){
+      this.state={trailer:{width:96,length:628},stacks:[],library:[],selectedId:null};
+      this.history=[]; this.future=[];
+      try{this.state.library=JSON.parse(localStorage.getItem("loadmaster-library")||"[]");}catch{}
+    }
+    snapshot(){return JSON.stringify(this.state);}
+    remember(){this.history.push(this.snapshot()); if(this.history.length>80)this.history.shift(); this.future=[];}
+    restore(raw){this.state=JSON.parse(raw); this.persistLibrary();}
+    persistLibrary(){localStorage.setItem("loadmaster-library",JSON.stringify(this.state.library));}
   }
 
-  $("compactBtn").addEventListener("click",()=>{
-    const before=snapShot();
-    const previousUsed=usedLength();
-    const result=advancedCompact();
-    if(!result.ok){
-      toast("No se encontró un acomodo válido; no se cambió la carga");
-      return;
+  class App {
+    constructor(){
+      this.store=new Store(); this.installPrompt=null; this.lastSolutions=[];
+      this.bind(); this.syncTrailerInputs(); this.render();
+      if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
     }
-    if(result.moved){
-      state.history.push(before);
-      if(state.history.length>80) state.history.shift();
-      state.future=[];
+    get state(){return this.store.state;}
+    toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2100);}
+    selected(){return this.state.stacks.find(s=>s.id===this.state.selectedId);}
+    valid(s){return Geometry.valid(s,this.state.stacks,this.state.trailer,s.id);}
+    syncTrailerInputs(){$("trailerWidth").value=this.state.trailer.width;$("trailerLength").value=this.state.trailer.length;}
+    bind(){
+      window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();this.installPrompt=e;$("installBtn").hidden=false;});
+      $("installBtn").onclick=async()=>{if(!this.installPrompt)return;this.installPrompt.prompt();await this.installPrompt.userChoice;this.installPrompt=null;$("installBtn").hidden=true;};
+      $("trailerPreset").onchange=e=>{const v=PRESETS[e.target.value];if(v){$("trailerWidth").value=v[0];$("trailerLength").value=v[1];}};
+      $("applyTrailer").onclick=()=>{this.store.remember();this.state.trailer={width:+$("trailerWidth").value||96,length:+$("trailerLength").value||628};this.render();};
+      $("librarySelect").onchange=()=>this.loadLibrarySelection();
+      $("saveLibrary").onclick=()=>this.saveLibraryItem();
+      $("addPallet").onclick=()=>this.addPallets();
+      $("rotateBtn").onclick=()=>this.rotateSelected(); $("floatRotateBtn").onclick=()=>this.rotateSelected();
+      $("lockBtn").onclick=()=>this.toggleLock(); $("floatLockBtn").onclick=()=>this.toggleLock();
+      $("duplicateBtn").onclick=()=>this.duplicateSelected();
+      $("deleteBtn").onclick=()=>this.deleteSelected(); $("floatDeleteBtn").onclick=()=>this.deleteSelected();
+      $("undoBtn").onclick=()=>this.undo(); $("redoBtn").onclick=()=>this.redo();
+      $("compactBtn").onclick=()=>this.compact(); $("optimizeBtn").onclick=()=>this.optimize();
+      $("clearBtn").onclick=()=>{if(!this.state.stacks.length)return;this.store.remember();this.state.stacks=[];this.state.selectedId=null;this.render();};
+      $("demoBtn").onclick=()=>this.demo();
+      $("saveLoadBtn").onclick=()=>this.saveFile(); $("openLoadBtn").onclick=()=>$("fileInput").click();
+      $("fileInput").onchange=e=>this.openFile(e); $("printBtn").onclick=()=>window.print();
+      $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;
+      $("trailer").onclick=e=>{if(e.target===$("trailer")||e.target.classList.contains("freeZone")){this.state.selectedId=null;this.render();}};
     }
-    render();
-    const saved=Math.max(0,Math.round(previousUsed-result.used));
-    toast(result.moved ? `Compactación real: ${result.moved} pila(s) movidas${saved?` · ${saved}\" menos`:''}` : "La carga ya estaba compactada");
-  });
-  $("clearBtn").addEventListener("click",()=>{
-    if(!confirm("¿Vaciar toda la carga?"))return;remember();state.stacks=[];state.selectedId=null;render();
-  });
+    loadLibrarySelection(){
+      const item=this.state.library.find(x=>x.id===$("librarySelect").value); if(!item)return;
+      $("palletWidth").value=item.w;$("palletLength").value=item.l;$("maxHeight").value=item.maxHeight;$("palletType").value=item.type;$("category").value=item.category;$("canRotate").checked=item.canRotate;$("palletName").value=item.name;
+    }
+    saveLibraryItem(){
+      const item={id:uid(),name:$("palletName").value.trim()||"Pallet",w:+$("palletWidth").value,l:+$("palletLength").value,maxHeight:+$("maxHeight").value,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked};
+      this.state.library.push(item);this.store.persistLibrary();this.renderLibrary();this.toast("Medida guardada");
+    }
+    splitQty(total,max){const r=[];while(total>0){const n=Math.min(total,max);r.push(n);total-=n;}return r;}
+    addPallets(){
+      const w=+$("palletWidth").value,l=+$("palletLength").value,qty=+$("palletQty").value,max=+$("maxHeight").value;
+      if(!(w>0&&l>0&&qty>0&&max>0)){this.toast("Revisa las medidas y cantidades");return;}
+      this.store.remember();
+      const base={name:$("palletName").value.trim()||`${w}×${l}`,w,l,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked,locked:false,rotated:false};
+      this.splitQty(qty,max).forEach((n,i)=>this.state.stacks.push({...base,id:uid(),qty:n,x:Math.min(this.state.trailer.width-w,4+(i%2)*(w+2)),y:Math.max(0,Geometry.usedLength(this.state.stacks)+2)}));
+      this.render();
+    }
+    rotateSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");if(s.locked)return this.toast("La pila está bloqueada");if(s.type!=="4-way"||!s.canRotate)return this.toast("Esta pila no puede girarse");this.store.remember();[s.w,s.l]=[s.l,s.w];s.rotated=!s.rotated;this.render();}
+    toggleLock(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();s.locked=!s.locked;this.render();}
+    duplicateSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();const c={...clone(s),id:uid(),x:s.x+2,y:s.y+s.l+2,locked:false};this.state.stacks.push(c);this.state.selectedId=c.id;this.render();}
+    deleteSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();this.state.stacks=this.state.stacks.filter(x=>x.id!==s.id);this.state.selectedId=null;this.render();}
+    undo(){if(!this.store.history.length)return;this.store.future.push(this.store.snapshot());this.store.restore(this.store.history.pop());this.syncTrailerInputs();this.render();}
+    redo(){if(!this.store.future.length)return;this.store.history.push(this.store.snapshot());this.store.restore(this.store.future.pop());this.syncTrailerInputs();this.render();}
+    compact(){
+      if(!this.state.stacks.length)return this.toast("No hay pilas");
+      const engine=new LoadEngine(this.state.trailer);const before=clone(this.state.stacks);const after=engine.localPolish(before);
+      const moved=after.filter(s=>{const o=before.find(x=>x.id===s.id);return Math.abs(o.x-s.x)>EPS||Math.abs(o.y-s.y)>EPS;}).length;
+      if(!moved)return this.toast("La carga ya está compactada");
+      this.store.remember();this.state.stacks=after;this.render();this.toast(`Compactación: ${moved} pila${moved===1?"":"s"} ajustada${moved===1?"":"s"}`);
+    }
+    optimize(){
+      if(!this.state.stacks.length)return this.toast("No hay pilas");
+      $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Analizando geometría, rotaciones y espacios libres…";$("optimizerResults").innerHTML="";
+      setTimeout(()=>{
+        const before=clone(this.state.stacks);const beforeUsed=Geometry.usedLength(before);const engine=new LoadEngine(this.state.trailer);const solutions=engine.optimize(before);this.lastSolutions=solutions;
+        if(!solutions.length){$("optimizerSummary").textContent="No se encontró una solución válida.";return;}
+        const best=solutions[0];
+        this.store.remember();this.state.stacks=clone(best.stacks);this.render();
+        const saved=Math.max(0,beforeUsed-best.used);
+        $("optimizerSummary").textContent=`Aplicada la mejor solución: ${best.moved} pilas movidas · ${saved.toFixed(1)}\" menos de largo.`;
+        this.renderSolutions(solutions,beforeUsed);
+        this.toast(best.moved?`IA movió ${best.moved} pila${best.moved===1?"":"s"}`:"La carga ya estaba en la mejor posición encontrada");
+      },30);
+    }
+    renderSolutions(solutions,beforeUsed){
+      const root=$("optimizerResults");root.innerHTML="";
+      solutions.forEach((sol,i)=>{
+        const card=document.createElement("article");card.className="optimizerResult";
+        card.innerHTML=`<div><strong>${i===0?"Mejor solución":`Alternativa ${i+1}`}</strong><p>${sol.used.toFixed(1)}\" usados · ${Math.max(0,beforeUsed-sol.used).toFixed(1)}\" ahorro · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.moved} movidas</p></div><button type="button">Aplicar</button>`;
+        card.querySelector("button").onclick=()=>{this.store.remember();this.state.stacks=clone(sol.stacks);this.render();this.toast("Solución aplicada");};root.appendChild(card);
+      });
+    }
+    demo(){
+      this.store.remember();this.state.trailer={width:96,length:628};this.state.stacks=[];
+      const add=(name,w,l,x,y,qty=20,type="4-way")=>this.state.stacks.push({id:uid(),name,w,l,x,y,qty,type,category:"New",canRotate:type==="4-way",locked:false,rotated:false});
+      add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
+      this.syncTrailerInputs();this.render();
+    }
+    saveFile(){const blob=new Blob([JSON.stringify({version:"3.0",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
+    async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
+    renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
+    render(){
+      const trailer=$("trailer");trailer.style.width=`${this.state.trailer.width*SCALE}px`;trailer.style.height=`${this.state.trailer.length*SCALE}px`;trailer.querySelectorAll(".stack").forEach(n=>n.remove());
+      this.state.stacks.forEach(s=>{const el=document.createElement("div");el.className="stack"+(s.id===this.state.selectedId?" selected":"")+(s.locked?" locked":"")+(this.valid(s)?"":" invalid");el.dataset.id=s.id;el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.style.width=`${s.w*SCALE}px`;el.style.height=`${s.l*SCALE}px`;el.innerHTML=`${s.name}<small>${s.qty} alto · ${s.type}</small>`;trailer.appendChild(el);this.wireDrag(el,s);});
+      this.renderLibrary();this.renderSelection();this.renderMetrics();
+    }
+    renderSelection(){const s=this.selected();$("selectedInfo").textContent=s?`${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${s.locked?" · bloqueada":""}`:"Ninguna seleccionada";$("floatingTools").hidden=!s;if(s){$("bottomSelectedName").textContent=`${s.name} · ${s.qty} alto · ${s.type}`;$("floatLockBtn").textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;$("floatRotateBtn").disabled=!can;}}
+    renderMetrics(){const used=Geometry.usedLength(this.state.stacks),free=Math.max(0,this.state.trailer.length-used),area=Geometry.floorArea(this.state.stacks),total=this.state.trailer.width*this.state.trailer.length,env=Math.max(1,this.state.trailer.width*used);$("metricStacks").textContent=this.state.stacks.length;$("metricPallets").textContent=this.state.stacks.reduce((a,s)=>a+s.qty,0);$("metricUsed").textContent=`${used.toFixed(1)}\"`;$("metricFree").textContent=`${free.toFixed(1)}\"`;$("metricUtilization").textContent=`${Math.min(100,area/Math.max(1,total)*100).toFixed(1)}%`;$("metricEfficiency").textContent=`${Math.min(100,area/env*100).toFixed(1)}%`;const bad=this.state.stacks.some(s=>!this.valid(s));$("metricStatus").textContent=bad?"Hay conflicto":"Carga válida";$("metricStatus").style.color=bad?"#dc2626":"#16a34a";$("freeZone").style.top=`${used*SCALE}px`;$("freeZone").style.height=`${free*SCALE}px`;}
+    wireDrag(el,s){let active=false,startX=0,startY=0,origin=null,before=null,moved=false;el.onpointerdown=e=>{e.preventDefault();e.stopPropagation();this.state.selectedId=s.id;this.renderSelection();if(s.locked)return this.toast("Esta pila está bloqueada");active=true;startX=e.clientX;startY=e.clientY;origin={x:s.x,y:s.y};before=this.store.snapshot();moved=false;el.setPointerCapture?.(e.pointerId);};el.onpointermove=e=>{if(!active)return;const dx=(e.clientX-startX)/SCALE,dy=(e.clientY-startY)/SCALE;if(Math.abs(dx)>0.5||Math.abs(dy)>0.5)moved=true;s.x=roundQuarter(origin.x+dx);s.y=roundQuarter(origin.y+dy);el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.classList.toggle("invalid",!this.valid(s));this.renderMetrics();};const finish=()=>{if(!active)return;active=false;if(moved){this.store.history.push(before);this.store.future=[];const others=this.state.stacks.filter(o=>o.id!==s.id);const axes=Geometry.candidateAxes(s,others,this.state.trailer);const nx=[...axes.xs].sort((a,b)=>Math.abs(a-s.x)-Math.abs(b-s.x))[0],ny=[...axes.ys].sort((a,b)=>Math.abs(a-s.y)-Math.abs(b-s.y))[0];const test={...s,x:nx,y:ny};if(Math.abs(nx-s.x)<=4&&Geometry.valid(test,others,this.state.trailer))s.x=nx;const test2={...s,y:ny};if(Math.abs(ny-s.y)<=4&&Geometry.valid(test2,others,this.state.trailer))s.y=ny;this.render();}};el.onpointerup=finish;el.onpointercancel=finish;}
+  }
 
-  $("demoBtn").addEventListener("click",()=>{
-    remember();
-    state.trailer={width:98,length:628};syncInputs();
-    state.stacks=[
-      {id:uid(),name:"145×26",w:26,l:145,qty:14,type:"2-way",category:"Combo",canRotate:false,locked:false,x:0,y:0},
-      {id:uid(),name:"145×26",w:26,l:145,qty:13,type:"2-way",category:"Combo",canRotate:false,locked:false,x:26,y:0},
-      {id:uid(),name:"145×26",w:26,l:145,qty:13,type:"2-way",category:"Combo",canRotate:false,locked:false,x:52,y:0},
-      {id:uid(),name:"52×52",w:52,l:52,qty:13,type:"4-way",category:"New",canRotate:true,locked:false,x:0,y:337},
-      {id:uid(),name:"48×40",w:40,l:48,qty:1,type:"4-way",category:"New",canRotate:true,locked:false,x:52,y:491},
-      {id:uid(),name:"27×27",w:27,l:27,qty:13,type:"4-way",category:"New",canRotate:true,locked:false,x:0,y:599}
-    ];
-    render();
-  });
-
-  $("saveLoadBtn").addEventListener("click",()=>{
-    const blob=new Blob([snapShot()],{type:"application/json"});
-    const a=document.createElement("a");a.href=URL.createObjectURL(blob);
-    a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);
-  });
-  $("openLoadBtn").addEventListener("click",()=>$("fileInput").click());
-  $("fileInput").addEventListener("change",async e=>{
-    const file=e.target.files[0];if(!file)return;
-    remember();restore(await file.text());e.target.value="";
-  });
-
-  $("printBtn").addEventListener("click",()=>{
-    const w=window.open("","_blank");
-    const clone=trailerEl.cloneNode(true);
-    clone.style.margin="20px auto";
-    w.document.write(`<html><head><title>Plano LoadMaster AI</title><style>
-      body{font-family:Arial;text-align:center}.trailer{position:relative;background:#fff;border:4px solid #111827}
-      .stack{position:absolute;border:2px solid #16a34a;background:#dbeafe;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10px;font-weight:bold;overflow:hidden}
-      .freeZone{position:absolute;left:0;right:0;bottom:0;background:#dcfce7}.noseTag,.doorTag{position:absolute;left:50%;transform:translateX(-50%);font-weight:bold}
-      .noseTag{top:2px}.doorTag{bottom:2px}</style></head><body>
-      <h1>LoadMaster AI v2.1 — Plano de carga</h1>
-      <p>Tráiler ${state.trailer.width}" × ${state.trailer.length}" · ${state.stacks.length} pilas · ${Math.max(0,state.trailer.length-usedLength())}" libres al final</p>
-      </body></html>`);
-    w.document.body.appendChild(clone);w.document.close();w.focus();setTimeout(()=>w.print(),300);
-  });
-
-  render();
+  new App();
 })();
