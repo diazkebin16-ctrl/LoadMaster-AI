@@ -807,6 +807,60 @@ class LoadEngine {
     return {stacks:validateLayout(polished,this.trailer).ok?polished:best.placed,unplaced:best.unplaced};
   }
 
+  gravityCompact(input){
+    // Compactación tipo gravedad hacia la nariz (y=0). Elimina huecos
+    // verticales sin cambiar el orden lateral ni reconstruir el plano.
+    const stacks=input.map(Geometry.clone);
+    for(let pass=0;pass<10;pass++){
+      let moved=false;
+      const ordered=stacks.filter(s=>!s.locked).sort((a,b)=>a.y-b.y||a.x-b.x);
+      for(const s of ordered){
+        let target=0;
+        for(const o of stacks){
+          if(o.id===s.id)continue;
+          const horizontal=s.x<o.x+o.w-EPS&&s.x+s.w>o.x+EPS;
+          if(horizontal&&o.y+o.l<=s.y+EPS)target=Math.max(target,o.y+o.l);
+        }
+        target=roundQuarter(target);
+        if(target<s.y-EPS){
+          const candidate={...s,y:target};
+          const others=stacks.filter(o=>o.id!==s.id);
+          if(Geometry.valid(candidate,others,this.trailer)){s.y=target;moved=true;}
+        }
+      }
+      if(!moved)break;
+    }
+    return stacks;
+  }
+
+  compactPendingRescue(placed,unplaced,originals){
+    // Paso final: compactar primero y volver a probar todas las pendientes en
+    // los huecos reales antes de recurrir a reconstrucciones grandes.
+    if(!unplaced||!unplaced.length)return null;
+    let base=this.gravityCompact(placed);
+    if(!validateLayout(base,this.trailer).ok)return null;
+    let pending=unplaced.map(Geometry.clone);
+    const orderPending=list=>[...list].sort((a,b)=>a.w*a.l-b.w*b.l||a.l-b.l||a.w-b.w);
+    for(let pass=0;pass<4&&pending.length;pass++){
+      const next=[];
+      for(const original of orderPending(pending)){
+        const options=this.placementOptions(original,base,240);
+        if(!options.length){next.push(original);continue;}
+        // Prefiere el hueco más cercano a la nariz y con mayor contacto.
+        options.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||Geometry.contactScore(b,base,this.trailer)-Geometry.contactScore(a,base,this.trailer)||a.x-b.x);
+        base.push(options[0]);
+      }
+      const before=next.length;
+      base=this.gravityCompact(base);
+      pending=next;
+      if(pending.length===before&&pass>0)break;
+    }
+    if(!validateLayout(base,this.trailer).ok)return null;
+    const placedIds=new Set(base.map(s=>s.id));
+    const stillMissing=originals.filter(s=>!placedIds.has(s.id));
+    return {name:stillMissing.length?'Compactación + revisión de huecos':'Compactación final · carga completa',family:'Compactación',stacks:base,unplaced:stillMissing};
+  }
+
   optimize(input){
     const locked=input.filter(s=>s.locked), movable=input.filter(s=>!s.locked);
     const lockedCheck=validateLayout(locked,this.trailer);
@@ -866,6 +920,25 @@ class LoadEngine {
       const partial=this.packPartial(order,locked,input,Math.max(90,beamWidth));
       if(partial&&partial.stacks.length>=locked.length){
         solutions.push({name:partial.unplaced.length?'Máxima carga parcial':'Optimización global',...partial});
+      }
+    }
+
+    // Antes de cualquier reconstrucción, elimina huecos verticales y vuelve a
+    // insertar las pendientes. Esto reproduce el ajuste manual de juntar pilas.
+    if(this.hasTime()){
+      const compactSeeds=solutions.map(s=>{
+        const ids=new Set((s.stacks||[]).map(x=>x.id));
+        const missing=input.filter(x=>!ids.has(x.id));
+        const pallets=(s.stacks||[]).reduce((sum,x)=>sum+(Number(x.qty)||1),0);
+        return {s,missing,pallets};
+      }).filter(x=>x.missing.length>0)
+        .sort((a,b)=>b.pallets-a.pallets||b.s.stacks.length-a.s.stacks.length)
+        .slice(0,8);
+      for(const seed of compactSeeds){
+        if(!this.hasTime())break;
+        const compacted=this.compactPendingRescue(seed.s.stacks,seed.missing,input);
+        if(compacted)solutions.push(compacted);
+        if(compacted&&!(compacted.unplaced||[]).length)break;
       }
     }
 

@@ -1,7 +1,20 @@
-# LoadMaster AI v5.10 STRUCTURE PLANNER
+# LoadMaster AI v5.11 GAP COMPACTOR
 
-Esta versión introduce un Motor V2 de planificación global. Antes de colocar pilas individualmente, genera estructuras completas de filas y zonas con filosofías distintas: grandes primero, pequeñas en extremos, bloques intercalados, medianas como puente e inversión completa.
+Esta versión conserva el Motor V2 de planificación estructural y agrega una fase final de compactación real.
 
-El motor anterior permanece como respaldo. Una solución estructural solo compite si es válida y nunca elimina la mejor solución previa.
+## Cambios principales
 
-También se mantienen: búsqueda 9→30 segundos, portafolio independiente, escape de óptimos locales, carga pendiente, autocompletado y validación de colisiones/límites.
+- Compactación tipo gravedad hacia la nariz del tráiler.
+- Elimina huecos verticales entre pilas sin reconstruir el plano completo.
+- Después de compactar, vuelve a escanear todos los huecos geométricos válidos.
+- Reintenta colocar las pilas pendientes antes de ejecutar rescates o reconstrucciones grandes.
+- Mantiene la solución anterior si la compactación no mejora la cantidad cargada.
+- Conserva el portafolio de estrategias, el Motor V2, carga pendiente, autocompletado y validación de colisiones.
+
+## Orden nuevo de optimización
+
+1. Planificación y búsqueda principal.
+2. Compactación de columnas.
+3. Revisión de huecos reales.
+4. Inserción de pendientes.
+5. Rescates locales o reconstrucción profunda únicamente si todavía hace falta.
