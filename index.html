@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 3.0 — Fase 2 Engine nuevo</title>
+  <title>LoadMaster AI 4.0 — Engine v2 modular</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,7 +12,7 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>Engine 3 · reescritura completa · v3.0</p>
+    <p>Engine v2 modular · validación total · v4.0</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
@@ -158,7 +158,7 @@
 
       </div>
     </div>
-    <p class="tip"><strong>Engine 3:</strong> motor geométrico independiente, búsqueda global, ajuste local exacto y comparación medible de soluciones. Bloquea las pilas que no quieras mover.</p>
+    <p class="tip"><strong>Engine v2:</strong> optimiza sobre una copia virtual, valida límites y colisiones antes de aplicar, y rechaza cualquier solución insegura.</p>
     <section id="optimizerPanel" class="optimizerPanel" hidden>
       <div class="optimizerHeader">
         <div><strong>Resultados de optimización</strong><p id="optimizerSummary">Buscando soluciones…</p></div>
@@ -181,6 +181,6 @@
 
 <div id="toast" class="toast" aria-live="polite"></div>
 
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

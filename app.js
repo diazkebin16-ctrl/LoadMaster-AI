@@ -1,197 +1,17 @@
-(() => {
-  "use strict";
+import { Geometry, EPS, roundQuarter } from "./engine/geometry.js";
+import { LoadEngine } from "./engine/optimizer.js";
+import { validateLayout, explainValidation } from "./engine/validator.js";
 
-  const SCALE = 1.05;
-  const EPS = 1e-6;
-  const PRESETS = {
-    "96x628":[96,628], "96x300":[96,300], "96x330":[96,330],
-    "95x574":[95,574], "96x574":[96,574], "95x628":[95,628], "98x628":[98,628]
-  };
-  const $ = id => document.getElementById(id);
-  const clone = value => JSON.parse(JSON.stringify(value));
-  const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-  const clamp = (n,min,max) => Math.max(min,Math.min(max,n));
-  const roundQuarter = n => Math.round(n*4)/4;
+"use strict";
 
-  class Geometry {
-    static overlaps(a,b) {
-      return !(a.x+a.w <= b.x+EPS || b.x+b.w <= a.x+EPS || a.y+a.l <= b.y+EPS || b.y+b.l <= a.y+EPS);
-    }
-    static inside(s,trailer) {
-      return s.x >= -EPS && s.y >= -EPS && s.x+s.w <= trailer.width+EPS && s.y+s.l <= trailer.length+EPS;
-    }
-    static valid(s,placed,trailer,ignoreId=null) {
-      return Geometry.inside(s,trailer) && !placed.some(o => o.id!==ignoreId && Geometry.overlaps(s,o));
-    }
-    static usedLength(stacks) {
-      return stacks.length ? Math.max(...stacks.map(s=>s.y+s.l)) : 0;
-    }
-    static floorArea(stacks) { return stacks.reduce((sum,s)=>sum+s.w*s.l,0); }
-    static contactScore(s,others,trailer) {
-      let score=0;
-      if (Math.abs(s.x) < EPS || Math.abs(s.x+s.w-trailer.width)<EPS) score += s.l;
-      if (Math.abs(s.y)<EPS) score += s.w;
-      others.forEach(o=>{
-        const verticalOverlap=Math.max(0,Math.min(s.y+s.l,o.y+o.l)-Math.max(s.y,o.y));
-        const horizontalOverlap=Math.max(0,Math.min(s.x+s.w,o.x+o.w)-Math.max(s.x,o.x));
-        if(Math.abs(s.x+s.w-o.x)<EPS || Math.abs(o.x+o.w-s.x)<EPS) score += verticalOverlap;
-        if(Math.abs(s.y+s.l-o.y)<EPS || Math.abs(o.y+o.l-s.y)<EPS) score += horizontalOverlap;
-      });
-      return score;
-    }
-    static candidateAxes(stack,placed,trailer) {
-      const xs = new Set([0, trailer.width-stack.w]);
-      const ys = new Set([0]);
-      placed.forEach(o=>{
-        [o.x, o.x+o.w, o.x-stack.w, o.x+o.w-stack.w].forEach(v=>xs.add(roundQuarter(v)));
-        [o.y, o.y+o.l, o.y-stack.l, o.y+o.l-stack.l].forEach(v=>ys.add(roundQuarter(v)));
-      });
-      return {
-        xs:[...xs].filter(x=>x>=-EPS && x+stack.w<=trailer.width+EPS).sort((a,b)=>a-b),
-        ys:[...ys].filter(y=>y>=-EPS && y+stack.l<=trailer.length+EPS).sort((a,b)=>a-b)
-      };
-    }
-    static candidates(stack,placed,trailer) {
-      const axes=Geometry.candidateAxes(stack,placed,trailer);
-      const out=[];
-      for(const y of axes.ys){
-        for(const x of axes.xs){
-          const c={...stack,x:roundQuarter(x),y:roundQuarter(y)};
-          if(Geometry.valid(c,placed,trailer)) out.push(c);
-        }
-      }
-      return out;
-    }
-  }
-
-  class LoadEngine {
-    constructor(trailer){ this.trailer=clone(trailer); }
-    orientations(s){
-      const list=[{w:s.w,l:s.l,rotated:!!s.rotated}];
-      if(s.type==="4-way" && s.canRotate && Math.abs(s.w-s.l)>EPS){
-        list.push({w:s.l,l:s.w,rotated:!s.rotated});
-      }
-      return list;
-    }
-    score(stacks, originals=null){
-      const used=Geometry.usedLength(stacks);
-      const area=Geometry.floorArea(stacks);
-      const envelope=Math.max(1,this.trailer.width*used);
-      const waste=envelope-area;
-      const contacts=stacks.reduce((sum,s)=>sum+Geometry.contactScore(s,stacks.filter(o=>o.id!==s.id),this.trailer),0);
-      let movement=0;
-      if(originals){
-        const map=new Map(originals.map(s=>[s.id,s]));
-        stacks.forEach(s=>{ const o=map.get(s.id); if(o) movement+=Math.abs(s.x-o.x)+Math.abs(s.y-o.y); });
-      }
-      return used*1e8 + waste*1e3 - contacts*10 + movement*0.01;
-    }
-    localPolish(input){
-      let stacks=clone(input);
-      const locked=stacks.filter(s=>s.locked);
-      const movable=stacks.filter(s=>!s.locked);
-      let changed=true, passes=0;
-      while(changed && passes<12){
-        changed=false; passes++;
-        movable.sort((a,b)=>(a.y+a.l)-(b.y+b.l) || a.x-b.x);
-        for(const s of movable){
-          const others=stacks.filter(o=>o.id!==s.id);
-          const before={...s};
-          const axes=Geometry.candidateAxes(s,others,this.trailer);
-          const candidates=[];
-          for(const x of axes.xs){
-            const c={...s,x,y:s.y}; if(Geometry.valid(c,others,this.trailer)) candidates.push(c);
-          }
-          for(const y of axes.ys){
-            const c={...s,x:s.x,y}; if(Geometry.valid(c,others,this.trailer)) candidates.push(c);
-          }
-          for(const c of Geometry.candidates(s,others,this.trailer)) candidates.push(c);
-          let best=before;
-          let bestKey=this.localKey(before,others,before);
-          for(const c of candidates){
-            const key=this.localKey(c,others,before);
-            if(key<bestKey-EPS){ best=c; bestKey=key; }
-          }
-          if(Math.abs(best.x-s.x)>EPS || Math.abs(best.y-s.y)>EPS){
-            Object.assign(s,best); changed=true;
-          }
-        }
-      }
-      return stacks;
-    }
-    localKey(c,others,origin){
-      const used=Math.max(c.y+c.l,...others.map(o=>o.y+o.l),0);
-      const contact=Geometry.contactScore(c,others,this.trailer);
-      const move=Math.abs(c.x-origin.x)+Math.abs(c.y-origin.y);
-      // Largo primero, luego más contacto. Distancia rompe empates y hace que una pila cercana a la pared derecha vaya a esa pared.
-      return used*1e8 - contact*1e3 + move;
-    }
-    orderVariants(stacks){
-      const base=clone(stacks);
-      const variants=[];
-      const add=arr=>variants.push(arr.map(s=>s.id));
-      add([...base].sort((a,b)=>b.w*b.l-a.w*a.l));
-      add([...base].sort((a,b)=>b.l-a.l || b.w-a.w));
-      add([...base].sort((a,b)=>b.w-a.w || b.l-a.l));
-      add([...base].sort((a,b)=>(b.w+b.l)-(a.w+a.l)));
-      add([...base].sort((a,b)=>a.y-b.y || a.x-b.x));
-      for(let i=0;i<8;i++){
-        const shuffled=[...base];
-        for(let j=shuffled.length-1;j>0;j--){ const k=Math.floor(Math.random()*(j+1)); [shuffled[j],shuffled[k]]=[shuffled[k],shuffled[j]]; }
-        add(shuffled);
-      }
-      return variants;
-    }
-    packByOrder(allStacks,orderIds,beamWidth=55){
-      const locked=clone(allStacks.filter(s=>s.locked));
-      if(locked.some((s,i)=>!Geometry.valid(s,locked.slice(0,i),this.trailer))) return null;
-      const source=new Map(allStacks.filter(s=>!s.locked).map(s=>[s.id,s]));
-      let beams=[locked];
-      for(const id of orderIds){
-        const original=source.get(id); if(!original) continue;
-        const next=[];
-        for(const placed of beams){
-          for(const orient of this.orientations(original)){
-            const shape={...original,...orient,x:0,y:0};
-            const candidates=Geometry.candidates(shape,placed,this.trailer).slice(0,160);
-            for(const c of candidates) next.push([...placed,c]);
-          }
-        }
-        if(!next.length) return null;
-        next.sort((a,b)=>this.score(a,allStacks)-this.score(b,allStacks));
-        const unique=[]; const seen=new Set();
-        for(const layout of next){
-          const key=layout.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join("|");
-          if(!seen.has(key)){seen.add(key);unique.push(layout);}
-          if(unique.length>=beamWidth) break;
-        }
-        beams=unique;
-      }
-      const best=beams.sort((a,b)=>this.score(a,allStacks)-this.score(b,allStacks))[0];
-      return best ? this.localPolish(best) : null;
-    }
-    optimize(input){
-      const start=this.localPolish(input);
-      const movable=input.filter(s=>!s.locked);
-      const candidates=[{name:"Ajuste exacto",stacks:start}];
-      for(const order of this.orderVariants(movable)){
-        const packed=this.packByOrder(input,order);
-        if(packed) candidates.push({name:"Búsqueda global",stacks:packed});
-      }
-      const unique=[]; const seen=new Set();
-      candidates.forEach(c=>{
-        const key=c.stacks.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join("|");
-        if(!seen.has(key)){seen.add(key); unique.push(c);}
-      });
-      unique.forEach(c=>{
-        c.score=this.score(c.stacks,input);
-        c.used=Geometry.usedLength(c.stacks);
-        c.efficiency=Geometry.floorArea(c.stacks)/Math.max(1,this.trailer.width*c.used)*100;
-        c.moved=c.stacks.filter(s=>{const o=input.find(x=>x.id===s.id);return o&&(Math.abs(o.x-s.x)>EPS||Math.abs(o.y-s.y)>EPS||o.w!==s.w||o.l!==s.l);}).length;
-      });
-      return unique.sort((a,b)=>a.score-b.score).slice(0,3);
-    }
-  }
+const SCALE = 1.05;
+const PRESETS = {
+  "96x628":[96,628], "96x300":[96,300], "96x330":[96,330],
+  "95x574":[95,574], "96x574":[96,574], "95x628":[95,628], "98x628":[98,628]
+};
+const $ = id => document.getElementById(id);
+const clone = value => JSON.parse(JSON.stringify(value));
+const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 
   class Store {
     constructor(){
@@ -262,7 +82,9 @@
     redo(){if(!this.store.future.length)return;this.store.history.push(this.store.snapshot());this.store.restore(this.store.future.pop());this.syncTrailerInputs();this.render();}
     compact(){
       if(!this.state.stacks.length)return this.toast("No hay pilas");
-      const engine=new LoadEngine(this.state.trailer);const before=clone(this.state.stacks);const after=engine.localPolish(before);
+      const engine=new LoadEngine(this.state.trailer);const before=clone(this.state.stacks);const result=engine.compact(before);
+      if(!result.ok)return this.toast(result.message||"No se pudo compactar con seguridad");
+      const after=result.stacks;
       const moved=after.filter(s=>{const o=before.find(x=>x.id===s.id);return Math.abs(o.x-s.x)>EPS||Math.abs(o.y-s.y)>EPS;}).length;
       if(!moved)return this.toast("La carga ya está compactada");
       this.store.remember();this.state.stacks=after;this.render();this.toast(`Compactación: ${moved} pila${moved===1?"":"s"} ajustada${moved===1?"":"s"}`);
@@ -271,12 +93,17 @@
       if(!this.state.stacks.length)return this.toast("No hay pilas");
       $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Analizando geometría, rotaciones y espacios libres…";$("optimizerResults").innerHTML="";
       setTimeout(()=>{
-        const before=clone(this.state.stacks);const beforeUsed=Geometry.usedLength(before);const engine=new LoadEngine(this.state.trailer);const solutions=engine.optimize(before);this.lastSolutions=solutions;
+        const before=clone(this.state.stacks);const beforeUsed=Geometry.usedLength(before);const engine=new LoadEngine(this.state.trailer);const report=engine.optimize(before);
+        if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return;}
+        const solutions=report.solutions;this.lastSolutions=solutions;
         if(!solutions.length){$("optimizerSummary").textContent="No se encontró una solución válida.";return;}
         const best=solutions[0];
+        const validation=validateLayout(best.stacks,this.state.trailer);
+        if(!validation.ok){$("optimizerSummary").textContent=`Solución rechazada: ${explainValidation(validation)}`;return;}
         this.store.remember();this.state.stacks=clone(best.stacks);this.render();
         const saved=Math.max(0,beforeUsed-best.used);
-        $("optimizerSummary").textContent=`Aplicada la mejor solución: ${best.moved} pilas movidas · ${saved.toFixed(1)}\" menos de largo.`;
+        const moveDetails=best.stacks.map(s=>{const o=before.find(x=>x.id===s.id);if(!o)return null;const dx=s.x-o.x,dy=s.y-o.y;return (Math.abs(dx)>EPS||Math.abs(dy)>EPS)?`${s.name}: x ${o.x.toFixed(1)}→${s.x.toFixed(1)}, y ${o.y.toFixed(1)}→${s.y.toFixed(1)}`:null;}).filter(Boolean);
+        $("optimizerSummary").textContent=`Aplicada la mejor solución: ${best.moved} pilas movidas · ${saved.toFixed(1)}\" menos de largo.${moveDetails.length?" "+moveDetails.slice(0,3).join(" · "):""}`;
         this.renderSolutions(solutions,beforeUsed);
         this.toast(best.moved?`IA movió ${best.moved} pila${best.moved===1?"":"s"}`:"La carga ya estaba en la mejor posición encontrada");
       },30);
@@ -286,7 +113,7 @@
       solutions.forEach((sol,i)=>{
         const card=document.createElement("article");card.className="optimizerResult";
         card.innerHTML=`<div><strong>${i===0?"Mejor solución":`Alternativa ${i+1}`}</strong><p>${sol.used.toFixed(1)}\" usados · ${Math.max(0,beforeUsed-sol.used).toFixed(1)}\" ahorro · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.moved} movidas</p></div><button type="button">Aplicar</button>`;
-        card.querySelector("button").onclick=()=>{this.store.remember();this.state.stacks=clone(sol.stacks);this.render();this.toast("Solución aplicada");};root.appendChild(card);
+        card.querySelector("button").onclick=()=>{const validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Solución inválida: ${explainValidation(validation)}`);this.store.remember();this.state.stacks=clone(sol.stacks);this.render();this.toast("Solución validada y aplicada");};root.appendChild(card);
       });
     }
     demo(){
@@ -295,7 +122,7 @@
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"3.0",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"4.0",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
     async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
     renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
     render(){
@@ -308,5 +135,6 @@
     wireDrag(el,s){let active=false,startX=0,startY=0,origin=null,before=null,moved=false;el.onpointerdown=e=>{e.preventDefault();e.stopPropagation();this.state.selectedId=s.id;this.renderSelection();if(s.locked)return this.toast("Esta pila está bloqueada");active=true;startX=e.clientX;startY=e.clientY;origin={x:s.x,y:s.y};before=this.store.snapshot();moved=false;el.setPointerCapture?.(e.pointerId);};el.onpointermove=e=>{if(!active)return;const dx=(e.clientX-startX)/SCALE,dy=(e.clientY-startY)/SCALE;if(Math.abs(dx)>0.5||Math.abs(dy)>0.5)moved=true;s.x=roundQuarter(origin.x+dx);s.y=roundQuarter(origin.y+dy);el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.classList.toggle("invalid",!this.valid(s));this.renderMetrics();};const finish=()=>{if(!active)return;active=false;if(moved){this.store.history.push(before);this.store.future=[];const others=this.state.stacks.filter(o=>o.id!==s.id);const axes=Geometry.candidateAxes(s,others,this.state.trailer);const nx=[...axes.xs].sort((a,b)=>Math.abs(a-s.x)-Math.abs(b-s.x))[0],ny=[...axes.ys].sort((a,b)=>Math.abs(a-s.y)-Math.abs(b-s.y))[0];const test={...s,x:nx,y:ny};if(Math.abs(nx-s.x)<=4&&Geometry.valid(test,others,this.state.trailer))s.x=nx;const test2={...s,y:ny};if(Math.abs(ny-s.y)<=4&&Geometry.valid(test2,others,this.state.trailer))s.y=ny;this.render();}};el.onpointerup=finish;el.onpointercancel=finish;}
   }
 
-  new App();
-})();
+
+
+new App();

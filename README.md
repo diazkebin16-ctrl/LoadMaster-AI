@@ -1,13 +1,5 @@
-# LoadMaster AI v3.0 — Fase 2
+# LoadMaster AI v4.0 — Engine v2 modular
 
-Reescritura completa del núcleo de la aplicación.
+Reescritura modular del núcleo de la Fase 2. El optimizador trabaja sobre una copia virtual, valida todas las pilas antes de aplicar una solución y nunca acepta pallets fuera del tráiler o superpuestos.
 
-- Motor geométrico independiente de la interfaz.
-- Compactación local exacta.
-- Optimización global con búsqueda por alternativas.
-- Rotación solo cuando está permitida.
-- Respeto de pilas bloqueadas.
-- Comparación antes/después y soluciones alternativas.
-- Tráiler predeterminado 96 × 628.
-
-Abra `index.html` o publique la carpeta en GitHub Pages.
+Módulos: geometry, collision, validator, scoring, refine y optimizer. Tráiler predeterminado: 96 × 628 pulgadas.
