@@ -427,102 +427,134 @@
   }
   $("optimizeBtn").addEventListener("click",optimize);
 
-  function layoutUsedLength(stacks){
-    return stacks.length ? Math.max(...stacks.map(s=>s.y+s.l)) : 0;
-  }
-
-  function layoutOverlaps(a,b){
+  // Motor de compactación avanzada: reconstruye únicamente las pilas desbloqueadas
+  // usando búsqueda por esquinas, varias órdenes de colocación y un beam search limitado.
+  function localOverlaps(a,b){
     return !(a.x+a.w<=b.x || b.x+b.w<=a.x || a.y+a.l<=b.y || b.y+b.l<=a.y);
   }
 
-  function layoutValid(s,placed){
-    if(s.x<0||s.y<0||s.x+s.w>state.trailer.width||s.y+s.l>state.trailer.length) return false;
-    return !placed.some(o=>o.id!==s.id&&layoutOverlaps(s,o));
+  function fitsPlacement(piece, placed){
+    if(piece.x<0 || piece.y<0 || piece.x+piece.w>state.trailer.width || piece.y+piece.l>state.trailer.length) return false;
+    return !placed.some(other=>localOverlaps(piece,other));
   }
 
-  function layoutCandidates(w,l,placed,id){
-    const xs=new Set([0,state.trailer.width-w]);
+  function packingCandidates(w,l,placed){
+    const xs=new Set([0]);
     const ys=new Set([0]);
-    placed.forEach(o=>{
-      xs.add(o.x);
-      xs.add(o.x+o.w);
-      xs.add(o.x-w);
-      xs.add(o.x+o.w-w);
-      ys.add(o.y);
-      ys.add(o.y+o.l);
-      ys.add(o.y-l);
-      ys.add(o.y+o.l-l);
+    placed.forEach(p=>{
+      xs.add(p.x); xs.add(p.x+p.w);
+      ys.add(p.y); ys.add(p.y+p.l);
     });
     const out=[];
-    [...ys].filter(y=>y>=0).sort((a,b)=>a-b).forEach(y=>{
-      [...xs].filter(x=>x>=0).sort((a,b)=>a-b).forEach(x=>{
-        const t={id,x,y,w,l};
-        if(layoutValid(t,placed)) out.push(t);
+    [...ys].sort((a,b)=>a-b).forEach(y=>{
+      [...xs].sort((a,b)=>a-b).forEach(x=>{
+        const p={x,y,w,l};
+        if(fitsPlacement(p,placed)) out.push(p);
       });
     });
-    return out;
+    return out.sort((a,b)=>(a.y+a.l)-(b.y+b.l) || a.y-b.y || a.x-b.x).slice(0,24);
   }
 
-  function compactAdvanced(){
-    const before=snapShot();
-    const locked=state.stacks.filter(s=>s.locked).map(s=>({...s}));
-    const moving=state.stacks.filter(s=>!s.locked).map(s=>({...s}));
-    if(!moving.length) return toast("No hay pilas desbloqueadas para compactar");
+  function packingScore(placed){
+    const used=placed.length ? Math.max(...placed.map(p=>p.y+p.l)) : 0;
+    // Penaliza huecos internos y posiciones laterales sin sacrificar el largo usado.
+    const footprint=placed.reduce((sum,p)=>sum+p.w*p.l,0);
+    const envelope=Math.max(1,state.trailer.width*used);
+    const empty=envelope-footprint;
+    const side=placed.reduce((sum,p)=>sum+p.x,0);
+    return used*100000 + empty*10 + side;
+  }
 
-    const orders=[
-      arr=>[...arr].sort((a,b)=>(b.w*b.l)-(a.w*a.l)||b.l-a.l||b.w-a.w),
-      arr=>[...arr].sort((a,b)=>b.l-a.l||b.w-a.w),
-      arr=>[...arr].sort((a,b)=>b.w-a.w||b.l-a.l),
-      arr=>[...arr].sort((a,b)=>a.y-b.y||a.x-b.x),
-      arr=>[...arr].sort((a,b)=>(b.w+b.l)-(a.w+a.l))
-    ];
+  function orderVariants(items){
+    const variants=[];
+    const add=arr=>{
+      const key=arr.map(x=>x.id).join('|');
+      if(!variants.some(v=>v.key===key)) variants.push({key,items:arr});
+    };
+    add([...items].sort((a,b)=>(b.w*b.l)-(a.w*a.l)));
+    add([...items].sort((a,b)=>Math.max(b.w,b.l)-Math.max(a.w,a.l) || (b.w*b.l)-(a.w*a.l)));
+    add([...items].sort((a,b)=>b.l-a.l || b.w-a.w));
+    add([...items].sort((a,b)=>b.w-a.w || b.l-a.l));
+    add([...items].sort((a,b)=>a.y-b.y || a.x-b.x));
+    // Variaciones deterministas para escapar de bloqueos locales sin resultados aleatorios.
+    for(let seed=1;seed<=5;seed++){
+      const arr=[...items];
+      for(let i=arr.length-1;i>0;i--){
+        const j=(seed*1103515245 + i*12345)%(i+1);
+        [arr[i],arr[j]]=[arr[j],arr[i]];
+      }
+      add(arr);
+    }
+    return variants.map(v=>v.items);
+  }
 
-    let best=null;
-    orders.forEach(makeOrder=>{
-      const placed=locked.map(s=>({...s}));
-      const failed=[];
-      makeOrder(moving).forEach(original=>{
-        const orientations=[{w:original.w,l:original.l}];
-        if(original.type==="4-way"&&original.canRotate&&original.w!==original.l){
-          orientations.push({w:original.l,l:original.w});
-        }
-        let choice=null;
+  function packInOrder(items,locked){
+    let beam=[{placed:locked.map(p=>({...p})),moves:[]}];
+    const BEAM_WIDTH=90;
+    for(const source of items){
+      const next=[];
+      const orientations=[{w:source.w,l:source.l,rotated:false}];
+      if(source.type==='4-way' && source.canRotate && source.w!==source.l){
+        orientations.push({w:source.l,l:source.w,rotated:true});
+      }
+      beam.forEach(node=>{
         orientations.forEach(o=>{
-          layoutCandidates(o.w,o.l,placed,original.id).forEach(pos=>{
-            const candidate={...original,...o,x:pos.x,y:pos.y};
-            const projected=Math.max(layoutUsedLength(placed),candidate.y+candidate.l);
-            const sideGap=Math.min(candidate.x,state.trailer.width-(candidate.x+candidate.w));
-            const score=[projected,candidate.y,sideGap,candidate.x];
-            if(!choice||score.some((v,i)=>v<choice.score[i]&&score.slice(0,i).every((x,j)=>x===choice.score[j]))){
-              choice={candidate,score};
-            }
+          packingCandidates(o.w,o.l,node.placed).forEach(pos=>{
+            const placedPiece={...source,x:pos.x,y:pos.y,w:o.w,l:o.l};
+            const placed=[...node.placed,placedPiece];
+            next.push({placed,moves:[...node.moves,placedPiece],score:packingScore(placed)});
           });
         });
-        if(choice) placed.push(choice.candidate);
-        else failed.push(original);
       });
-
-      // Si alguna pila no pudo colocarse, conservarla para no perder información.
-      failed.forEach(s=>placed.push({...s}));
-      const conflicts=placed.filter((s,i)=>!layoutValid(s,placed.filter((_,j)=>j!==i))).length;
-      const used=layoutUsedLength(placed.filter(s=>s.x>=0&&s.y>=0&&s.x+s.w<=state.trailer.width&&s.y+s.l<=state.trailer.length));
-      const result={placed,conflicts,used};
-      if(!best||result.conflicts<best.conflicts||(result.conflicts===best.conflicts&&result.used<best.used)) best=result;
-    });
-
-    state.history.push(before);
-    if(state.history.length>80) state.history.shift();
-    state.future=[];
-    state.stacks=best.placed;
-    render();
-    if(best.conflicts){
-      toast(`Compactación terminada con ${best.conflicts} conflicto(s)`);
-    }else{
-      toast(`Compactación avanzada: ${Math.round(best.used)} pulgadas usadas`);
+      if(!next.length) return null;
+      next.sort((a,b)=>a.score-b.score);
+      beam=next.slice(0,BEAM_WIDTH);
     }
+    return beam.sort((a,b)=>a.score-b.score)[0]||null;
   }
 
-  $("compactBtn").addEventListener("click",compactAdvanced);
+  function advancedCompact(){
+    const locked=state.stacks.filter(s=>s.locked);
+    const moving=state.stacks.filter(s=>!s.locked);
+    if(!moving.length) return {ok:true,moved:0,used:usedLength()};
+
+    let best=null;
+    orderVariants(moving).forEach(order=>{
+      const result=packInOrder(order,locked);
+      if(result && (!best || result.score<best.score)) best=result;
+    });
+    if(!best) return {ok:false,moved:0,used:usedLength()};
+
+    const before=new Map(moving.map(s=>[s.id,{x:s.x,y:s.y,w:s.w,l:s.l}]));
+    const byId=new Map(best.moves.map(s=>[s.id,s]));
+    moving.forEach(s=>{
+      const p=byId.get(s.id);
+      s.x=p.x; s.y=p.y; s.w=p.w; s.l=p.l;
+    });
+    const moved=moving.filter(s=>{
+      const b=before.get(s.id);
+      return b.x!==s.x || b.y!==s.y || b.w!==s.w || b.l!==s.l;
+    }).length;
+    return {ok:true,moved,used:usedLength()};
+  }
+
+  $("compactBtn").addEventListener("click",()=>{
+    const before=snapShot();
+    const previousUsed=usedLength();
+    const result=advancedCompact();
+    if(!result.ok){
+      toast("No se encontró un acomodo válido; no se cambió la carga");
+      return;
+    }
+    if(result.moved){
+      state.history.push(before);
+      if(state.history.length>80) state.history.shift();
+      state.future=[];
+    }
+    render();
+    const saved=Math.max(0,Math.round(previousUsed-result.used));
+    toast(result.moved ? `Compactación real: ${result.moved} pila(s) movidas${saved?` · ${saved}\" menos`:''}` : "La carga ya estaba compactada");
+  });
   $("clearBtn").addEventListener("click",()=>{
     if(!confirm("¿Vaciar toda la carga?"))return;remember();state.stacks=[];state.selectedId=null;render();
   });
