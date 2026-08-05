@@ -1,5 +1,3 @@
-# LoadMaster AI v5.2 DEEP
+# LoadMaster AI v5.3 ADAPTIVE
 
-Versión con optimización escalonada de 9 a 30 segundos, búsqueda de combinaciones independiente de patrones guardados, carga pendiente editable y autocompletado visible desde la biblioteca.
-
-Sube todos los archivos descomprimidos a la raíz de GitHub Pages.
+Motor mejorado con reconstrucción por zonas, memoria local de estrategias, búsqueda automática de 9 a 30 segundos, carga pendiente editable y autocompletado independiente para tráileres y pallets.

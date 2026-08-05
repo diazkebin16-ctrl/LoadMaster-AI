@@ -1,8 +1,9 @@
-# LoadMaster AI v5.2 DEEP — reporte de pruebas
+# Reporte de pruebas v5.3
 
-- PASS: carga parcial conserva pilas fuera.
-- PASS: combinación automática 34+34+28 y 42+42 sin patrones guardados.
-- PASS: JavaScript válido.
-- PASS: segunda fase configurada: 9 segundos rápidos + 21 segundos profundos (máximo total 30 s).
-- PASS: las pilas no colocadas se guardan en `state.pending` y se muestran como Carga pendiente.
-- PASS: selección de biblioteca autocompleta largo, ancho, altura, tipo, categoría y nombre con confirmación visible.
+- PASS: carga parcial conserva y reporta pilas pendientes.
+- PASS: combinaciones automáticas 34+34+28 y 42+42.
+- PASS: reacomodo completo después de mover tres pilas de un plano válido.
+- PASS: memoria local de estrategias reutiliza secuencias exitosas.
+- PASS: JavaScript sin errores de sintaxis.
+- PASS: autocompletado de tráiler y pallet usa indicadores separados.
+- PASS: caché actualizada a v5.3.

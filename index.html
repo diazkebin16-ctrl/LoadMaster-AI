@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 5.1 — Optimización real</title>
+  <title>LoadMaster AI 5.3 — Reacomodo inteligente</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,14 +12,14 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>Engine v4 · carga parcial real · v5.1</p>
+    <p>Engine v5 · reconstrucción por zonas · v5.3</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
 
 <main class="app">
   <aside class="sidebar">
-    <section class="card versionCard"><strong>v5.2 DEEP</strong> · Búsqueda automática de 9 a 30 segundos, pendientes editables y autocompletado visible.</section>
+    <section class="card versionCard"><strong>v5.3 ADAPTIVE</strong> · Reconstrucción por zonas, aprendizaje de estrategias y búsqueda automática 9→30 segundos.</section>
     <section class="card">
       <h2>Tráiler</h2>
       <label>Modelo guardado
@@ -33,7 +33,7 @@
           <option value="98x628">98×628</option>
           <option value="custom">Personalizado</option>
         </select>
-        <small id="libraryAutofillStatus" class="autofillStatus">Selecciona una medida guardada para autocompletar.</small>
+        <small id="trailerAutofillStatus" class="autofillStatus">Selecciona un modelo para autocompletar el tráiler.</small>
       </label>
       <div class="grid2">
         <label>Largo (pulg.) — IZQUIERDA
@@ -52,6 +52,7 @@
         <select id="librarySelect">
           <option value="">— Nueva medida —</option>
         </select>
+        <small id="libraryAutofillStatus" class="autofillStatus">Selecciona una medida guardada para autocompletar el pallet.</small>
       </label>
       <div class="grid2">
         <label>Largo — IZQUIERDA
@@ -208,6 +209,6 @@
 
 <div id="toast" class="toast" aria-live="polite"></div>
 
-<script defer src="app.js?v=5.2-deep"></script>
+<script defer src="app.js?v=5.3-adaptive"></script>
 </body>
 </html>

@@ -105,9 +105,10 @@ const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, 
 const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
 
 class LoadEngine {
-  constructor(trailer,{timeLimitMs=9000,patterns=[]}={}){
+  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[]}={}){
     this.trailer=Geometry.clone(trailer);
     this.patterns=Array.isArray(patterns)?Geometry.clone(patterns):[];
+    this.strategies=Array.isArray(strategies)?Geometry.clone(strategies):[];
     this.deadline=Date.now()+timeLimitMs;
     this.timedOut=false;
   }
@@ -159,7 +160,24 @@ class LoadEngine {
       for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
       variants.push(a);
     }
-    return [...this.rowCombinationOrders(movable),...variants];
+    return [...this.strategyOrders(movable),...this.rowCombinationOrders(movable),...variants];
+  }
+
+  strategyOrders(movable){
+    const results=[];
+    for(const strategy of this.strategies.slice(-40).reverse()){
+      if(!strategy||!Array.isArray(strategy.sequence))continue;
+      const available=[...movable],order=[];
+      for(const wanted of strategy.sequence){
+        const i=available.findIndex(s=>Math.abs(s.w-wanted.w)<EPS&&Math.abs(s.l-wanted.l)<EPS&&String(s.type||'')===String(wanted.type||''));
+        const r=available.findIndex(s=>isFourWay(s)&&s.canRotate!==false&&Math.abs(s.w-wanted.l)<EPS&&Math.abs(s.l-wanted.w)<EPS&&String(s.type||'')===String(wanted.type||''));
+        const idx=i>=0?i:r;
+        if(idx>=0)order.push(available.splice(idx,1)[0]);
+      }
+      if(order.length>=2)results.push([...order,...available]);
+      if(results.length>=12)break;
+    }
+    return results;
   }
 
   rowCombinationOrders(movable){
@@ -362,6 +380,32 @@ class LoadEngine {
   }
 
 
+  destroyRepair(input,originals){
+    const validBase=input.filter(s=>Geometry.valid(s,input.filter(x=>x.id!==s.id),this.trailer));
+    const movable=input.filter(s=>!s.locked);
+    const candidates=[];
+    const destroySizes=[3,5,8,12,Math.min(18,movable.length)];
+    const priorities=[
+      [...movable].sort((a,b)=>(b.y+b.l)-(a.y+a.l)),
+      [...movable].sort((a,b)=>b.w*b.l-a.w*a.l),
+      [...movable].sort((a,b)=>a.y-b.y||a.x-b.x)
+    ];
+    for(const ranked of priorities){
+      for(const size of destroySizes){
+        if(!this.hasTime())return candidates;
+        const removed=new Set(ranked.slice(0,size).map(s=>s.id));
+        const base=input.filter(s=>s.locked||(!removed.has(s.id)&&Geometry.valid(s,input.filter(x=>x.id!==s.id&&!removed.has(x.id)),this.trailer)));
+        const pending=input.filter(s=>!base.some(x=>x.id===s.id));
+        for(const order of this.orders(pending).slice(0,size>=12?5:3)){
+          if(!this.hasTime())return candidates;
+          const partial=this.packPartial(order,base,originals,size>=12?220:170);
+          if(partial&&validateLayout(partial.stacks,this.trailer).ok)candidates.push({name:`Reconstrucción de zona (${size})`,...partial});
+        }
+      }
+    }
+    return candidates;
+  }
+
   patternSeeds(input){
     const seeds=[];
     for(const pattern of this.patterns){
@@ -463,6 +507,10 @@ class LoadEngine {
       }
     }
 
+    if(this.hasTime()){
+      for(const rebuilt of this.destroyRepair(input,input))solutions.push(rebuilt);
+    }
+
     const valid=[],seen=new Set();
     for(const s of solutions){
       const check=validateLayout(s.stacks,this.trailer);
@@ -527,6 +575,22 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
     return {id:uid(),version:1,name:name||`Patrón ${new Date().toLocaleDateString()}`,createdAt:new Date().toISOString(),trailer:{width:trailer.width,length:trailer.length},source:{fileName:source.fileName||'',fileSize:source.fileSize||0,fileType:source.fileType||''},rows:rows.map(r=>({y:r.y,length:r.length,signature:r.signature})),pieces:stacks.map(s=>({name:s.name,w:s.w,l:s.l,x:s.x,y:s.y,qty:s.qty,type:s.type,category:s.category,canRotate:s.canRotate!==false,rotated:!!s.rotated}))};
   }
 
+  const STRATEGY_STORAGE_KEY = "loadmaster-strategies-v1";
+  class StrategyMemory {
+    constructor(){this.items=this.load();}
+    load(){try{const v=JSON.parse(localStorage.getItem(STRATEGY_STORAGE_KEY)||"[]");return Array.isArray(v)?v:[];}catch{return [];}}
+    persist(){localStorage.setItem(STRATEGY_STORAGE_KEY,JSON.stringify(this.items.slice(-80)));}
+    learn(stacks,trailer,source="auto"){
+      if(!Array.isArray(stacks)||stacks.length<2)return;
+      const sequence=[...stacks].sort((a,b)=>a.y-b.y||a.x-b.x).map(s=>({w:s.w,l:s.l,type:s.type||"",rotated:!!s.rotated}));
+      const signature=sequence.map(s=>`${s.w}x${s.l}:${s.type}`).join("|");
+      const existing=this.items.find(x=>x.signature===signature&&Math.abs(Number(x.trailerWidth)-Number(trailer.width))<EPS);
+      if(existing){existing.hits=(existing.hits||1)+1;existing.updatedAt=new Date().toISOString();existing.source=source;}
+      else this.items.push({id:uid(),signature,sequence,trailerWidth:trailer.width,hits:1,source,updatedAt:new Date().toISOString()});
+      this.items.sort((a,b)=>(a.hits||1)-(b.hits||1));this.persist();
+    }
+  }
+
   class Store {
     constructor(){
       this.state={trailer:{width:96,length:628},stacks:[],pending:[],library:[],selectedId:null};
@@ -541,7 +605,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
 
   class App {
     constructor(){
-      this.store=new Store(); this.patternMemory=new PatternMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null;
+      this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null;
       this.bind(); this.syncTrailerInputs(); this.render();
       if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
     }
@@ -553,7 +617,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
     bind(){
       window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();this.installPrompt=e;$("installBtn").hidden=false;});
       $("installBtn").onclick=async()=>{if(!this.installPrompt)return;this.installPrompt.prompt();await this.installPrompt.userChoice;this.installPrompt=null;$("installBtn").hidden=true;};
-      $("trailerPreset").onchange=e=>{const v=PRESETS[e.target.value];if(v){$("trailerWidth").value=v[0];$("trailerLength").value=v[1];}};
+      $("trailerPreset").onchange=e=>{const v=PRESETS[e.target.value];if(v){$("trailerWidth").value=v[0];$("trailerLength").value=v[1];$("trailerAutofillStatus").textContent=`✓ Tráiler autocompletado: ${v[1]} largo × ${v[0]} ancho`;}};
       $("applyTrailer").onclick=()=>{this.store.remember();this.state.trailer={width:+$("trailerWidth").value||96,length:+$("trailerLength").value||628};this.render();};
       $("librarySelect").onchange=()=>this.loadLibrarySelection();
       $("saveLibrary").onclick=()=>this.saveLibraryItem();
@@ -677,17 +741,17 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
         if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return null;}
         const solutions=report.solutions;if(!solutions.length)return null;
         const best=solutions[0],validation=validateLayout(best.stacks,this.state.trailer);if(!validation.ok)return null;
-        this.lastSolutions=solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.render();
+        this.lastSolutions=solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.strategyMemory.learn(best.stacks,this.state.trailer,"optimización");this.render();
         const saved=Math.max(0,beforeUsed-best.used),leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?"":"s"} pendientes (${best.unplacedPallets} pallets)`:' · Toda la carga quedó dentro';
         $("optimizerSummary").textContent=`${phaseLabel}: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets cargados · ${saved.toFixed(1)}\" menos de largo${leftText}`;
         this.renderSolutions(solutions,beforeUsed);return best;
       };
       setTimeout(()=>{
-        const fast=new LoadEngine(this.state.trailer,{timeLimitMs:9000,patterns:this.patternMemory.patterns});const fastReport=fast.optimize(original);const fastBest=applyReport(fastReport,"Resultado rápido");
+        const fast=new LoadEngine(this.state.trailer,{timeLimitMs:9000,patterns:this.patternMemory.patterns,strategies:this.strategyMemory.items});const fastReport=fast.optimize(original);const fastBest=applyReport(fastReport,"Resultado rápido");
         if(!fastBest||!fastBest.unplacedStacks){this.toast("Optimización terminada");return;}
         $("optimizerSummary").textContent+=` · Búsqueda profunda activa hasta 30 segundos…`;
         setTimeout(()=>{
-          const deep=new LoadEngine(this.state.trailer,{timeLimitMs:21000,patterns:[]});const deepReport=deep.optimize(original);
+          const deep=new LoadEngine(this.state.trailer,{timeLimitMs:21000,patterns:[],strategies:this.strategyMemory.items});const deepReport=deep.optimize(original);
           if(!deepReport.ok)return;
           const candidates=[...(fastReport.solutions||[]),...(deepReport.solutions||[])];
           candidates.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
@@ -721,7 +785,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
     }
     renderSelection(){const s=this.selected();$("selectedInfo").textContent=s?`${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${s.locked?" · bloqueada":""}`:"Ninguna seleccionada";$("floatingTools").hidden=!s;if(s){$("bottomSelectedName").textContent=`${s.name} · ${s.qty} alto · ${s.type}`;$("floatLockBtn").textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;$("floatRotateBtn").disabled=!can;}}
     renderMetrics(){const used=Geometry.usedLength(this.state.stacks),free=Math.max(0,this.state.trailer.length-used),area=Geometry.floorArea(this.state.stacks),total=this.state.trailer.width*this.state.trailer.length,env=Math.max(1,this.state.trailer.width*used);$("metricStacks").textContent=this.state.stacks.length;$("metricPallets").textContent=this.state.stacks.reduce((a,s)=>a+s.qty,0);$("metricUsed").textContent=`${used.toFixed(1)}\"`;$("metricFree").textContent=`${free.toFixed(1)}\"`;$("metricUtilization").textContent=`${Math.min(100,area/Math.max(1,total)*100).toFixed(1)}%`;$("metricEfficiency").textContent=`${Math.min(100,area/env*100).toFixed(1)}%`;const bad=this.state.stacks.some(s=>!this.valid(s));$("metricStatus").textContent=bad?"Hay conflicto":"Carga válida";$("metricStatus").style.color=bad?"#dc2626":"#16a34a";$("freeZone").style.top=`${used*SCALE}px`;$("freeZone").style.height=`${free*SCALE}px`;}
-    wireDrag(el,s){let active=false,startX=0,startY=0,origin=null,before=null,moved=false;el.onpointerdown=e=>{e.preventDefault();e.stopPropagation();this.state.selectedId=s.id;this.renderSelection();if(s.locked)return this.toast("Esta pila está bloqueada");active=true;startX=e.clientX;startY=e.clientY;origin={x:s.x,y:s.y};before=this.store.snapshot();moved=false;el.setPointerCapture?.(e.pointerId);};el.onpointermove=e=>{if(!active)return;const dx=(e.clientX-startX)/SCALE,dy=(e.clientY-startY)/SCALE;if(Math.abs(dx)>0.5||Math.abs(dy)>0.5)moved=true;s.x=roundQuarter(origin.x+dx);s.y=roundQuarter(origin.y+dy);el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.classList.toggle("invalid",!this.valid(s));this.renderMetrics();};const finish=()=>{if(!active)return;active=false;if(moved){this.store.history.push(before);this.store.future=[];const others=this.state.stacks.filter(o=>o.id!==s.id);const axes=Geometry.candidateAxes(s,others,this.state.trailer);const nx=[...axes.xs].sort((a,b)=>Math.abs(a-s.x)-Math.abs(b-s.x))[0],ny=[...axes.ys].sort((a,b)=>Math.abs(a-s.y)-Math.abs(b-s.y))[0];const test={...s,x:nx,y:ny};if(Math.abs(nx-s.x)<=4&&Geometry.valid(test,others,this.state.trailer))s.x=nx;const test2={...s,y:ny};if(Math.abs(ny-s.y)<=4&&Geometry.valid(test2,others,this.state.trailer))s.y=ny;this.render();}};el.onpointerup=finish;el.onpointercancel=finish;}
+    wireDrag(el,s){let active=false,startX=0,startY=0,origin=null,before=null,moved=false;el.onpointerdown=e=>{e.preventDefault();e.stopPropagation();this.state.selectedId=s.id;this.renderSelection();if(s.locked)return this.toast("Esta pila está bloqueada");active=true;startX=e.clientX;startY=e.clientY;origin={x:s.x,y:s.y};before=this.store.snapshot();moved=false;el.setPointerCapture?.(e.pointerId);};el.onpointermove=e=>{if(!active)return;const dx=(e.clientX-startX)/SCALE,dy=(e.clientY-startY)/SCALE;if(Math.abs(dx)>0.5||Math.abs(dy)>0.5)moved=true;s.x=roundQuarter(origin.x+dx);s.y=roundQuarter(origin.y+dy);el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.classList.toggle("invalid",!this.valid(s));this.renderMetrics();};const finish=()=>{if(!active)return;active=false;if(moved){this.store.history.push(before);this.store.future=[];const others=this.state.stacks.filter(o=>o.id!==s.id);const axes=Geometry.candidateAxes(s,others,this.state.trailer);const nx=[...axes.xs].sort((a,b)=>Math.abs(a-s.x)-Math.abs(b-s.x))[0],ny=[...axes.ys].sort((a,b)=>Math.abs(a-s.y)-Math.abs(b-s.y))[0];const test={...s,x:nx,y:ny};if(Math.abs(nx-s.x)<=4&&Geometry.valid(test,others,this.state.trailer))s.x=nx;const test2={...s,y:ny};if(Math.abs(ny-s.y)<=4&&Geometry.valid(test2,others,this.state.trailer))s.y=ny;this.render();if(validateLayout(this.state.stacks,this.state.trailer).ok)this.strategyMemory.learn(this.state.stacks,this.state.trailer,"corrección manual");}};el.onpointerup=finish;el.onpointercancel=finish;}
   }
 
 

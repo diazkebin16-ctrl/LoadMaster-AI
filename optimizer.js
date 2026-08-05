@@ -7,9 +7,10 @@ const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, 
 const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
 
 export class LoadEngine {
-  constructor(trailer,{timeLimitMs=9000,patterns=[]}={}){
+  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[]}={}){
     this.trailer=Geometry.clone(trailer);
     this.patterns=Array.isArray(patterns)?Geometry.clone(patterns):[];
+    this.strategies=Array.isArray(strategies)?Geometry.clone(strategies):[];
     this.deadline=Date.now()+timeLimitMs;
     this.timedOut=false;
   }
@@ -233,6 +234,32 @@ export class LoadEngine {
   }
 
 
+  destroyRepair(input,originals){
+    const validBase=input.filter(s=>Geometry.valid(s,input.filter(x=>x.id!==s.id),this.trailer));
+    const movable=input.filter(s=>!s.locked);
+    const candidates=[];
+    const destroySizes=[3,5,8,12,Math.min(18,movable.length)];
+    const priorities=[
+      [...movable].sort((a,b)=>(b.y+b.l)-(a.y+a.l)),
+      [...movable].sort((a,b)=>b.w*b.l-a.w*a.l),
+      [...movable].sort((a,b)=>a.y-b.y||a.x-b.x)
+    ];
+    for(const ranked of priorities){
+      for(const size of destroySizes){
+        if(!this.hasTime())return candidates;
+        const removed=new Set(ranked.slice(0,size).map(s=>s.id));
+        const base=input.filter(s=>s.locked||(!removed.has(s.id)&&Geometry.valid(s,input.filter(x=>x.id!==s.id&&!removed.has(x.id)),this.trailer)));
+        const pending=input.filter(s=>!base.some(x=>x.id===s.id));
+        for(const order of this.orders(pending).slice(0,size>=12?5:3)){
+          if(!this.hasTime())return candidates;
+          const partial=this.packPartial(order,base,originals,size>=12?220:170);
+          if(partial&&validateLayout(partial.stacks,this.trailer).ok)candidates.push({name:`Reconstrucción de zona (${size})`,...partial});
+        }
+      }
+    }
+    return candidates;
+  }
+
   patternSeeds(input){
     const seeds=[];
     for(const pattern of this.patterns){
@@ -332,6 +359,10 @@ export class LoadEngine {
       if(partial&&partial.stacks.length>=locked.length){
         solutions.push({name:partial.unplaced.length?'Máxima carga parcial':'Optimización global',...partial});
       }
+    }
+
+    if(this.hasTime()){
+      for(const rebuilt of this.destroyRepair(input,input))solutions.push(rebuilt);
     }
 
     const valid=[],seen=new Set();
