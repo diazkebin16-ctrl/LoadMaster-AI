@@ -1,18 +1,30 @@
-# LoadMaster AI v5.11 GAP COMPACTOR — reporte de pruebas
+# Informe de pruebas — LoadMaster AI v5.12 REPEATABLE SOLVER
 
-## Prueba nueva v5.11
+## Cambios verificados
 
-Se creó un escenario con una columna de pallets 28×28 separada por huecos verticales y dos pilas 28×28 pendientes. La fase nueva:
+- Normalización y compactación obligatoria de cada candidato finalista antes de puntuarlo.
+- Reinserción automática de pilas pendientes después de compactar.
+- Varias rondas independientes con semillas distintas dentro del límite total de 30 segundos.
+- Memoria automática de soluciones completas mediante patrones comprobados.
+- Conservación del mejor resultado anterior y rechazo de soluciones inferiores.
+- Control de rendimiento: normalización de los candidatos más fuertes y representantes de cada familia.
 
-- compactó la columna hacia la nariz;
-- eliminó todos los espacios intermedios;
-- creó un espacio continuo al final;
-- insertó las dos pilas pendientes;
-- conservó todas las pilas;
-- no produjo colisiones ni piezas fuera del tráiler.
+## Pruebas aprobadas
 
-Resultado: `PASS v5.11: compactación por gravedad, revisión de huecos e inserción de dos pendientes.`
+- v5.0: patrones y restricciones de rotación.
+- v5.1/v5.2: carga parcial, validación y combinaciones de ancho.
+- v5.3: recuperación después de mover tres pilas y memoria de estrategias.
+- v5.5: rescate de dos pilas y compatibilidad del autocompletado.
+- v5.6: reconstrucción amplia sin degradación.
+- v5.7: diversidad de soluciones.
+- v5.8: portafolio independiente y piso de calidad.
+- v5.9: escape de óptimo local.
+- v5.10: planificación estructural.
+- v5.11: compactación por gravedad e inserción de dos pendientes.
+- v5.12: normalización obligatoria, reinserción y estabilidad repetible.
 
-## Regresión
+## Validaciones adicionales
 
-Pasaron las pruebas de v5.0, v5.1/v5.2, v5.3, v5.5, v5.6, v5.7, v5.8, v5.9 y v5.10. También pasaron las validaciones de sintaxis de `app.js` y `optimizer.js`.
+- `app.js` y `optimizer.js` pasan la comprobación de sintaxis de Node.js.
+- Todos los layouts de las pruebas pasan validación de límites y colisiones.
+- No se pierden pilas durante la compactación o reinserción.

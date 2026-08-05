@@ -861,6 +861,24 @@ class LoadEngine {
     return {name:stillMissing.length?'Compactación + revisión de huecos':'Compactación final · carga completa',family:'Compactación',stacks:base,unplaced:stillMissing};
   }
 
+  normalizeCandidate(candidate,originals){
+    // v5.12: toda solución debe estabilizarse antes de ser evaluada. Primero
+    // elimina huecos verticales y después vuelve a insertar las pendientes.
+    if(!candidate||!Array.isArray(candidate.stacks))return null;
+    let stacks=this.gravityCompact(candidate.stacks);
+    if(!validateLayout(stacks,this.trailer).ok)return null;
+    const ids=new Set(stacks.map(s=>s.id));
+    let missing=originals.filter(s=>!ids.has(s.id));
+    if(missing.length){
+      const rescued=this.compactPendingRescue(stacks,missing,originals);
+      if(rescued&&validateLayout(rescued.stacks,this.trailer).ok){
+        stacks=rescued.stacks;
+        missing=rescued.unplaced||[];
+      }
+    }
+    return {...candidate,name:missing.length?`${candidate.name||'Solución'} · normalizada`:`${candidate.name||'Solución'} · completa`,family:candidate.family||'Normalizada',stacks,unplaced:missing};
+  }
+
   optimize(input){
     const locked=input.filter(s=>s.locked), movable=input.filter(s=>!s.locked);
     const lockedCheck=validateLayout(locked,this.trailer);
@@ -968,7 +986,28 @@ class LoadEngine {
     }
 
     const valid=[],seen=new Set();
-    for(const s of solutions){
+    // Normaliza todos los candidatos finalistas. Para mantener el límite de
+    // tiempo, primero elimina duplicados y conserva los 48 candidatos con mayor
+    // carga, incluyendo al menos uno de cada familia de búsqueda.
+    const prelimSeen=new Set(),prelim=[];
+    for(const raw of solutions){
+      if(!raw||!Array.isArray(raw.stacks))continue;
+      const key=raw.stacks.map(x=>`${x.id}:${x.x},${x.y},${x.w},${x.l}`).sort().join('|');
+      if(prelimSeen.has(key))continue;prelimSeen.add(key);
+      const pallets=raw.stacks.reduce((n,x)=>n+(Number(x.qty)||1),0);
+      prelim.push({raw,pallets,count:raw.stacks.length,used:Geometry.usedLength(raw.stacks)});
+    }
+    prelim.sort((a,b)=>b.pallets-a.pallets||b.count-a.count||a.used-b.used);
+    const candidatePool=prelim.slice(0,48).map(x=>x.raw);
+    for(const family of new Set(prelim.map(x=>x.raw.family).filter(Boolean))){
+      const representative=prelim.find(x=>x.raw.family===family)?.raw;
+      if(representative&&!candidatePool.includes(representative))candidatePool.push(representative);
+    }
+    // Normalización obligatoria antes de calificar: ningún finalista puede ser
+    // elegido mientras conserve huecos que aún se pueden cerrar.
+    for(const raw of candidatePool){
+      const s=this.normalizeCandidate(raw,input);
+      if(!s)continue;
       const check=validateLayout(s.stacks,this.trailer);
       if(!check.ok)continue;
       const placedIds=new Set(s.stacks.map(x=>x.id));
@@ -986,9 +1025,19 @@ class LoadEngine {
     valid.sort((a,b)=>
       b.loadedPallets-a.loadedPallets ||
       b.loadedStacks-a.loadedStacks ||
-      a.score-b.score
+      a.score-b.score ||
+      ((String(b.name).includes('Patrón aprendido')?1:0)-(String(a.name).includes('Patrón aprendido')?1:0))
     );
-    return valid.length?{ok:true,solutions:selectDiverseSolutions(valid,3,this.trailer),timedOut:this.timedOut}:{ok:false,timedOut:this.timedOut,message:'No se pudo colocar ninguna pila adicional de forma válida. Revisa las pilas bloqueadas y las dimensiones.'};
+    if(valid.length){
+      const selected=selectDiverseSolutions(valid,3,this.trailer);
+      const learned=valid.find(s=>String(s.name).includes('Patrón aprendido'));
+      if(learned&&!selected.some(s=>s===learned||String(s.name).includes('Patrón aprendido'))){
+        if(selected.length>=3)selected[selected.length-1]=learned;else selected.push(learned);
+      }
+      selected.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
+      return {ok:true,solutions:selected,timedOut:this.timedOut};
+    }
+    return {ok:false,timedOut:this.timedOut,message:'No se pudo colocar ninguna pila adicional de forma válida. Revisa las pilas bloqueadas y las dimensiones.'};
   }
 }
 
@@ -1002,15 +1051,19 @@ function runPortfolioSearch(input,trailer,{totalTimeMs=21000,patterns=[],strateg
   ];
   const started=Date.now(), all=[...(baselineSolutions||[])];
   const bestBaseline=(baselineSolutions||[]).slice().sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score)[0]||null;
-  for(let i=0;i<profiles.length;i++){
-    const elapsed=Date.now()-started,remaining=totalTimeMs-elapsed;
-    if(remaining<80)break;
-    const slots=profiles.length-i;
-    const budget=Math.max(80,Math.floor(remaining/slots));
-    const spec=profiles[i];
-    const engine=new LoadEngine(trailer,{timeLimitMs:budget,patterns:i===0?patterns:[],strategies,seedOffset:spec.seedOffset,profile:spec.profile});
+  // Repite rondas independientes hasta encontrar una carga completa o agotar
+  // el presupuesto. Cada ronda usa semillas nuevas para que un acierto no dependa
+  // de presionar Optimizar cinco veces manualmente.
+  let attempt=0;
+  while(Date.now()-started<totalTimeMs-120 && attempt<16){
+    const spec=profiles[attempt%profiles.length];
+    const remaining=totalTimeMs-(Date.now()-started);
+    const budget=Math.max(140,Math.min(2600,Math.floor(remaining/Math.max(1,Math.min(4,16-attempt)))));
+    const engine=new LoadEngine(trailer,{timeLimitMs:budget,patterns:attempt===0?patterns:[],strategies,seedOffset:spec.seedOffset+attempt*131,profile:spec.profile});
     const report=engine.optimize(Geometry.clone(input));
-    if(report.ok)for(const sol of report.solutions||[])all.push({...sol,portfolio:spec.profile,name:`${spec.label} · ${sol.name||'resultado'}`});
+    if(report.ok)for(const sol of report.solutions||[])all.push({...sol,portfolio:spec.profile,name:`${spec.label} · intento ${attempt+1} · ${sol.name||'resultado'}`});
+    if(all.some(s=>s&&((s.unplacedStacks===0)||((s.unplaced||[]).length===0))))break;
+    attempt++;
   }
   // Segunda etapa especializada: parte de las mejores soluciones parciales y
   // reconstruye regiones grandes para escapar del óptimo local.
@@ -1040,7 +1093,7 @@ function runPortfolioSearch(input,trailer,{totalTimeMs=21000,patterns=[],strateg
     valid.push(sol);
   }
   valid.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
-  return {ok:valid.length>0,solutions:selectDiverseSolutions(valid,3,trailer),attemptedProfiles:profiles.length,elapsedMs:Date.now()-started};
+  return {ok:valid.length>0,solutions:selectDiverseSolutions(valid,3,trailer),attemptedProfiles:profiles.length,attemptedRuns:attempt+1,elapsedMs:Date.now()-started};
 }
 
 // ===== app.js =====
@@ -1071,6 +1124,15 @@ function normalizeLibraryItem(raw={}){
     load(){try{const v=JSON.parse(localStorage.getItem(PATTERN_STORAGE_KEY)||"[]");return Array.isArray(v)?v:[];}catch{return [];}}
     persist(){localStorage.setItem(PATTERN_STORAGE_KEY,JSON.stringify(this.patterns.slice(-100)));}
     add(pattern){this.patterns.push(pattern);this.persist();return pattern;}
+    learnComplete(stacks,trailer){
+      if(!Array.isArray(stacks)||!stacks.length)return null;
+      const composition=[...stacks].map(s=>`${s.w}x${s.l}:${s.type||''}:${Number(s.qty)||1}`).sort().join('|');
+      const existing=this.patterns.find(p=>p&&p.autoComplete&&p.composition===composition&&Math.abs(Number(p.trailer?.width)-Number(trailer.width))<EPS&&Math.abs(Number(p.trailer?.length)-Number(trailer.length))<EPS);
+      if(existing){existing.hits=(existing.hits||1)+1;existing.updatedAt=new Date().toISOString();this.persist();return existing;}
+      const pattern=createPattern(`Solución completa aprendida ${new Date().toLocaleString()}`,stacks,trailer,{fileName:'auto-complete'});
+      pattern.autoComplete=true;pattern.composition=composition;pattern.hits=1;
+      this.patterns.push(pattern);this.persist();return pattern;
+    }
     remove(id){this.patterns=this.patterns.filter(p=>p.id!==id);this.persist();}
     get(id){return this.patterns.find(p=>p.id===id);}
   }
@@ -1259,7 +1321,7 @@ function normalizeLibraryItem(raw={}){
         if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return null;}
         const solutions=report.solutions;if(!solutions.length)return null;
         const best=solutions[0],validation=validateLayout(best.stacks,this.state.trailer);if(!validation.ok)return null;
-        this.lastSolutions=solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.strategyMemory.learn(best.stacks,this.state.trailer,"optimización");this.render();
+        this.lastSolutions=solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.strategyMemory.learn(best.stacks,this.state.trailer,"optimización");if(!(best.unplaced||[]).length)this.patternMemory.learnComplete(best.stacks,this.state.trailer);this.render();
         const saved=Math.max(0,beforeUsed-best.used),leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?"":"s"} pendientes (${best.unplacedPallets} pallets)`:' · Toda la carga quedó dentro';
         $("optimizerSummary").textContent=`${phaseLabel}: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets cargados · ${saved.toFixed(1)}\" menos de largo${leftText}`;
         this.renderSolutions(solutions,beforeUsed);return best;
