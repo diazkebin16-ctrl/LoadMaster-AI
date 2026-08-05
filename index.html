@@ -19,7 +19,7 @@
 
 <main class="app">
   <aside class="sidebar">
-    <section class="card versionCard"><strong>v5.1 REAL</strong> · Motor con carga parcial, múltiples estrategias y resultado visible de pallets fuera.</section>
+    <section class="card versionCard"><strong>v5.2 DEEP</strong> · Búsqueda automática de 9 a 30 segundos, pendientes editables y autocompletado visible.</section>
     <section class="card">
       <h2>Tráiler</h2>
       <label>Modelo guardado
@@ -33,6 +33,7 @@
           <option value="98x628">98×628</option>
           <option value="custom">Personalizado</option>
         </select>
+        <small id="libraryAutofillStatus" class="autofillStatus">Selecciona una medida guardada para autocompletar.</small>
       </label>
       <div class="grid2">
         <label>Largo (pulg.) — IZQUIERDA
@@ -186,6 +187,11 @@
         <button id="closeOptimizer" type="button">Cerrar</button>
       </div>
       <div id="optimizerResults" class="optimizerResults"></div>
+      <section class="pendingSection">
+        <div class="pendingHeader"><strong>Carga pendiente (<span id="pendingCount">0</span>)</strong><span><button id="retryPendingBtn" type="button">Reintentar</button><button id="clearPendingBtn" type="button">Eliminar pendientes</button></span></div>
+        <div id="pendingList" class="pendingList"><div class="pendingEmpty">No hay pilas pendientes.</div></div>
+      </section>
+
     </section>
   </section>
 </main>
@@ -202,6 +208,6 @@
 
 <div id="toast" class="toast" aria-live="polite"></div>
 
-<script defer src="app.js?v=5.1-real"></script>
+<script defer src="app.js?v=5.2-deep"></script>
 </body>
 </html>

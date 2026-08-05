@@ -203,3 +203,12 @@ body{padding-bottom:92px}
 .patternItem div{min-width:0}.patternItem strong,.patternItem small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.patternItem small{color:var(--muted);font-size:.7rem;margin-top:.15rem}
 .patternActions{display:flex;gap:.25rem}.patternActions button{padding:.35rem .45rem;font-size:.72rem}
 .patternDetected{font-size:.76rem;color:var(--muted);margin-top:.45rem;line-height:1.4}
+
+.autofillStatus{display:block;margin-top:6px;color:#047857;font-weight:700}
+.pendingSection{margin-top:14px;padding-top:12px;border-top:1px solid #dbe3ee}
+.pendingHeader{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.pendingHeader span{display:flex;gap:6px}
+.pendingList{display:grid;gap:7px;margin-top:8px}
+.pendingItem{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px;border:1px solid #fecaca;background:#fff7f7;border-radius:10px}
+.pendingItem small{display:block;color:#7f1d1d;margin-top:3px}
+.pendingEmpty{color:#64748b;padding:8px 0}

@@ -159,7 +159,38 @@ class LoadEngine {
       for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
       variants.push(a);
     }
-    return variants;
+    return [...this.rowCombinationOrders(movable),...variants];
+  }
+
+  rowCombinationOrders(movable){
+    const results=[];
+    // Limita la búsqueda combinatoria a representantes de medidas; evita n^4 con cargas grandes.
+    const representatives=[];const perShape=new Map();
+    for(const s of movable){const key=[s.w,s.l,s.type,s.canRotate!==false].join('|');const n=perShape.get(key)||0;if(n<4){representatives.push(s);perShape.set(key,n+1);}if(representatives.length>=18)break;}
+    const poses=s=>this.orientations(s).map(o=>({id:s.id,w:o.w,l:o.l}));
+    const maxItems=Math.min(4,representatives.length);let explored=0;
+    const search=(row,usedWidth)=>{
+      if(!this.hasTime()||explored++>6000)return;
+      if(row.length>=2){
+        const ids=new Set(row.map(r=>r.id));const chosen=row.map(r=>movable.find(s=>s.id===r.id));
+        results.push([...chosen,...movable.filter(s=>!ids.has(s.id))]);
+      }
+      if(row.length>=maxItems)return;
+      for(const s of representatives){
+        if(row.some(r=>r.id===s.id))continue;
+        for(const o of poses(s))if(usedWidth+o.w<=this.trailer.width+EPS)search([...row,o],usedWidth+o.w);
+      }
+    };
+    search([],0);
+    const scored=results.map(order=>{let bestGap=this.trailer.width;
+      for(let take=2;take<=Math.min(4,order.length);take++){
+        const subset=order.slice(0,take);const combos=[[]];
+        for(const s of subset){const next=[];for(const c of combos)for(const o of this.orientations(s))next.push([...c,o]);combos.splice(0,combos.length,...next);}
+        for(const c of combos){const width=c.reduce((n,o)=>n+o.w,0);if(width<=this.trailer.width+EPS)bestGap=Math.min(bestGap,this.trailer.width-width);}
+      }
+      return {order,gap:bestGap};
+    }).sort((a,b)=>a.gap-b.gap);
+    const unique=[],seen=new Set();for(const x of scored){const key=x.order.map(s=>s.id).join('|');if(seen.has(key))continue;seen.add(key);unique.push(x.order);if(unique.length>=18)break;}return unique;
   }
 
   placementOptions(original,placed,limit=48){
@@ -498,13 +529,13 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
 
   class Store {
     constructor(){
-      this.state={trailer:{width:96,length:628},stacks:[],library:[],selectedId:null};
+      this.state={trailer:{width:96,length:628},stacks:[],pending:[],library:[],selectedId:null};
       this.history=[]; this.future=[];
       try{this.state.library=JSON.parse(localStorage.getItem("loadmaster-library")||"[]");}catch{}
     }
     snapshot(){return JSON.stringify(this.state);}
     remember(){this.history.push(this.snapshot()); if(this.history.length>80)this.history.shift(); this.future=[];}
-    restore(raw){this.state=JSON.parse(raw); this.persistLibrary();}
+    restore(raw){this.state=JSON.parse(raw);this.state.pending=this.state.pending||[]; this.persistLibrary();}
     persistLibrary(){localStorage.setItem("loadmaster-library",JSON.stringify(this.state.library));}
   }
 
@@ -537,7 +568,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       $("demoBtn").onclick=()=>this.demo();
       $("saveLoadBtn").onclick=()=>this.saveFile(); $("openLoadBtn").onclick=()=>$("fileInput").click();
       $("fileInput").onchange=e=>this.openFile(e); $("printBtn").onclick=()=>window.print();
-      $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;
+      $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;$("retryPendingBtn").onclick=()=>this.retryPending();$("clearPendingBtn").onclick=()=>this.clearPending();
       $("referenceImageInput").onchange=e=>this.loadReferenceImage(e);
       $("learnPatternBtn").onclick=()=>this.learnCurrentPattern();
       $("analyzePatternBtn").onclick=()=>this.analyzeCurrentRows();
@@ -588,7 +619,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
     }
     loadLibrarySelection(){
       const item=this.state.library.find(x=>x.id===$("librarySelect").value); if(!item)return;
-      $("palletWidth").value=item.w;$("palletLength").value=item.l;$("maxHeight").value=item.maxHeight;$("palletType").value=item.type;$("category").value=item.category;$("canRotate").checked=item.canRotate;$("palletName").value=item.name;
+      $("palletWidth").value=item.w;$("palletLength").value=item.l;$("maxHeight").value=item.maxHeight;$("palletType").value=item.type;$("category").value=item.category;$("canRotate").checked=item.canRotate;$("palletName").value=item.name;$("libraryAutofillStatus").textContent=`✓ Autocompletado: ${item.l} largo × ${item.w} ancho · altura ${item.maxHeight}`;this.toast("Medida y altura autocompletadas");
     }
     saveLibraryItem(){
       const item={id:uid(),name:$("palletName").value.trim()||"Pallet",w:+$("palletWidth").value,l:+$("palletLength").value,maxHeight:+$("maxHeight").value,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked};
@@ -609,6 +640,25 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
     deleteSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();this.state.stacks=this.state.stacks.filter(x=>x.id!==s.id);this.state.selectedId=null;this.render();}
     undo(){if(!this.store.history.length)return;this.store.future.push(this.store.snapshot());this.store.restore(this.store.history.pop());this.syncTrailerInputs();this.render();}
     redo(){if(!this.store.future.length)return;this.store.history.push(this.store.snapshot());this.store.restore(this.store.future.pop());this.syncTrailerInputs();this.render();}
+    renderPending(){
+      const root=$("pendingList"),count=$("pendingCount");if(!root||!count)return;
+      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";
+      if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';return;}
+      pending.forEach(s=>{const row=document.createElement("div");row.className="pendingItem";row.innerHTML=`<div><strong>${s.name}</strong><small>${s.w}×${s.l} · ${s.qty||1} pallets · ${s.type}</small></div><button type="button" data-edit>Editar</button>`;row.querySelector("[data-edit]").onclick=()=>this.editPending(s.id);root.appendChild(row);});
+    }
+    editPending(id){
+      const s=(this.state.pending||[]).find(x=>x.id===id);if(!s)return;
+      $("palletWidth").value=s.w;$("palletLength").value=s.l;$("palletQty").value=s.qty||1;$("maxHeight").value=s.qty||1;$("palletType").value=s.type||"4-way";$("category").value=s.category||"New";$("canRotate").checked=s.canRotate!==false;$("palletName").value=s.name||`${s.w}×${s.l}`;
+      this.store.remember();this.state.pending=this.state.pending.filter(x=>x.id!==id);this.renderPending();this.toast("Pila pendiente cargada en el formulario; edítala y pulsa Crear pilas");
+    }
+    retryPending(){
+      if(!(this.state.pending||[]).length)return this.toast("No hay pilas pendientes");
+      const start=Geometry.usedLength(this.state.stacks)+2;this.store.remember();
+      this.state.pending.forEach((s,i)=>this.state.stacks.push({...clone(s),x:Math.max(0,Math.min(this.state.trailer.width-s.w,(i%2)*(s.w+2))),y:start+i*2}));
+      this.state.pending=[];this.render();this.toast("Pendientes devueltas a la carga para reintentar");
+    }
+    clearPending(){if(!(this.state.pending||[]).length)return;this.store.remember();this.state.pending=[];this.renderPending();this.toast("Carga pendiente eliminada");}
+
     compact(){
       if(!this.state.stacks.length)return this.toast("No hay pilas");
       const engine=new LoadEngine(this.state.trailer);const before=clone(this.state.stacks);const result=engine.compact(before);
@@ -619,23 +669,31 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       this.store.remember();this.state.stacks=after;this.render();this.toast(`Compactación: ${moved} pila${moved===1?"":"s"} ajustada${moved===1?"":"s"}`);
     }
     optimize(){
-      if(!this.state.stacks.length)return this.toast("No hay pilas");
-      $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Analizando geometría, rotaciones y espacios libres…";$("optimizerResults").innerHTML="";
+      const allInput=[...this.state.stacks,...(this.state.pending||[])];
+      if(!allInput.length)return this.toast("No hay pilas");
+      $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Fase rápida: buscando durante hasta 9 segundos…";$("optimizerResults").innerHTML="";
+      const original=clone(allInput),beforeUsed=Geometry.usedLength(this.state.stacks);
+      const applyReport=(report,phaseLabel)=>{
+        if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return null;}
+        const solutions=report.solutions;if(!solutions.length)return null;
+        const best=solutions[0],validation=validateLayout(best.stacks,this.state.trailer);if(!validation.ok)return null;
+        this.lastSolutions=solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.render();
+        const saved=Math.max(0,beforeUsed-best.used),leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?"":"s"} pendientes (${best.unplacedPallets} pallets)`:' · Toda la carga quedó dentro';
+        $("optimizerSummary").textContent=`${phaseLabel}: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets cargados · ${saved.toFixed(1)}\" menos de largo${leftText}`;
+        this.renderSolutions(solutions,beforeUsed);return best;
+      };
       setTimeout(()=>{
-        const before=clone(this.state.stacks);const beforeUsed=Geometry.usedLength(before);const engine=new LoadEngine(this.state.trailer,{timeLimitMs:9000,patterns:this.patternMemory.patterns});const report=engine.optimize(before);
-        if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return;}
-        const solutions=report.solutions;this.lastSolutions=solutions;this.lastUnplaced=solutions[0]?.unplaced||[];
-        if(!solutions.length){$("optimizerSummary").textContent="No se encontró una solución válida.";return;}
-        const best=solutions[0];
-        const validation=validateLayout(best.stacks,this.state.trailer);
-        if(!validation.ok){$("optimizerSummary").textContent=`Solución rechazada: ${explainValidation(validation)}`;return;}
-        this.store.remember();this.state.stacks=clone(best.stacks);this.render();
-        const saved=Math.max(0,beforeUsed-best.used);
-        const moveDetails=best.stacks.map(s=>{const o=before.find(x=>x.id===s.id);if(!o)return null;const dx=s.x-o.x,dy=s.y-o.y;return (Math.abs(dx)>EPS||Math.abs(dy)>EPS)?`${s.name}: x ${o.x.toFixed(1)}→${s.x.toFixed(1)}, y ${o.y.toFixed(1)}→${s.y.toFixed(1)}`:null;}).filter(Boolean);
-        const leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?"":"s"} (${best.unplacedPallets} pallets) fuera: ${best.unplaced.slice(0,4).map(s=>s.name).join(", ")}${best.unplaced.length>4?"…":""}`:" · Toda la carga quedó dentro";
-        $("optimizerSummary").textContent=`Aplicada: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets cargados · ${best.moved} movidas · ${saved.toFixed(1)}\" menos de largo${leftText}.${report.timedOut?" Mejor resultado seguro encontrado en 9 s.":""}`;
-        this.renderSolutions(solutions,beforeUsed);
-        this.toast(best.moved?`IA movió ${best.moved} pila${best.moved===1?"":"s"}`:"La carga ya estaba en la mejor posición encontrada");
+        const fast=new LoadEngine(this.state.trailer,{timeLimitMs:9000,patterns:this.patternMemory.patterns});const fastReport=fast.optimize(original);const fastBest=applyReport(fastReport,"Resultado rápido");
+        if(!fastBest||!fastBest.unplacedStacks){this.toast("Optimización terminada");return;}
+        $("optimizerSummary").textContent+=` · Búsqueda profunda activa hasta 30 segundos…`;
+        setTimeout(()=>{
+          const deep=new LoadEngine(this.state.trailer,{timeLimitMs:21000,patterns:[]});const deepReport=deep.optimize(original);
+          if(!deepReport.ok)return;
+          const candidates=[...(fastReport.solutions||[]),...(deepReport.solutions||[])];
+          candidates.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
+          const merged={ok:true,solutions:candidates.slice(0,3)};const deepBest=applyReport(merged,"Resultado final (búsqueda 9→30 s)");
+          this.toast(deepBest&&deepBest.unplacedStacks?"Se conservó la mayor carga encontrada; revisa Pendientes":"Toda la carga quedó acomodada");
+        },50);
       },30);
     }
     renderSolutions(solutions,beforeUsed){
@@ -644,7 +702,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
         const card=document.createElement("article");card.className="optimizerResult";
         const left=sol.unplacedStacks?` · <b>${sol.unplacedStacks} fuera</b> (${sol.unplacedPallets} pallets): ${sol.unplaced.slice(0,3).map(s=>s.name).join(", ")}${sol.unplaced.length>3?"…":""}`:" · <b>Carga completa</b>";
         card.innerHTML=`<div><strong>${i===0?"Mejor solución":`Alternativa ${i+1}`}</strong><p>${sol.loadedStacks} pilas / ${sol.loadedPallets} pallets dentro · ${sol.used.toFixed(1)}\" usados · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.rotated||0} giradas${left}</p></div><button type="button">Aplicar</button>`;
-        card.querySelector("button").onclick=()=>{const validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Solución inválida: ${explainValidation(validation)}`);this.store.remember();this.state.stacks=clone(sol.stacks);this.render();this.toast("Solución validada y aplicada");};root.appendChild(card);
+        card.querySelector("button").onclick=()=>{const validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Solución inválida: ${explainValidation(validation)}`);this.store.remember();this.state.stacks=clone(sol.stacks);this.state.pending=clone(sol.unplaced||[]);this.render();this.toast("Solución validada y aplicada");};root.appendChild(card);
       });
     }
     demo(){
@@ -653,13 +711,13 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.0",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.0.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-    async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.2",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.2.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.pending=d.pending||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
     renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
     render(){
       const trailer=$("trailer");trailer.style.width=`${this.state.trailer.width*SCALE}px`;trailer.style.height=`${this.state.trailer.length*SCALE}px`;trailer.querySelectorAll(".stack").forEach(n=>n.remove());
       this.state.stacks.forEach(s=>{const el=document.createElement("div");el.className="stack"+(s.id===this.state.selectedId?" selected":"")+(s.locked?" locked":"")+(this.valid(s)?"":" invalid");el.dataset.id=s.id;el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.style.width=`${s.w*SCALE}px`;el.style.height=`${s.l*SCALE}px`;el.innerHTML=`${s.name}<small>${s.qty} alto · ${s.type}</small>`;trailer.appendChild(el);this.wireDrag(el,s);});
-      this.renderLibrary();this.renderSelection();this.renderMetrics();this.renderPatterns();
+      this.renderLibrary();this.renderSelection();this.renderMetrics();this.renderPatterns();this.renderPending();
     }
     renderSelection(){const s=this.selected();$("selectedInfo").textContent=s?`${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${s.locked?" · bloqueada":""}`:"Ninguna seleccionada";$("floatingTools").hidden=!s;if(s){$("bottomSelectedName").textContent=`${s.name} · ${s.qty} alto · ${s.type}`;$("floatLockBtn").textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;$("floatRotateBtn").disabled=!can;}}
     renderMetrics(){const used=Geometry.usedLength(this.state.stacks),free=Math.max(0,this.state.trailer.length-used),area=Geometry.floorArea(this.state.stacks),total=this.state.trailer.width*this.state.trailer.length,env=Math.max(1,this.state.trailer.width*used);$("metricStacks").textContent=this.state.stacks.length;$("metricPallets").textContent=this.state.stacks.reduce((a,s)=>a+s.qty,0);$("metricUsed").textContent=`${used.toFixed(1)}\"`;$("metricFree").textContent=`${free.toFixed(1)}\"`;$("metricUtilization").textContent=`${Math.min(100,area/Math.max(1,total)*100).toFixed(1)}%`;$("metricEfficiency").textContent=`${Math.min(100,area/env*100).toFixed(1)}%`;const bad=this.state.stacks.some(s=>!this.valid(s));$("metricStatus").textContent=bad?"Hay conflicto":"Carga válida";$("metricStatus").style.color=bad?"#dc2626":"#16a34a";$("freeZone").style.top=`${used*SCALE}px`;$("freeZone").style.height=`${free*SCALE}px`;}
