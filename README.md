@@ -1,10 +1,5 @@
-# LoadMaster AI v5.8 PORTFOLIO SEARCH
+# LoadMaster AI v5.9 OPTIMUM ESCAPE
 
-- Mantiene la mejor solución de v5.7 como piso de calidad.
-- Ejecuta cuatro optimizadores independientes: grandes, pequeñas, filas y reinicio total.
-- Cada optimizador usa una semilla distinta y un presupuesto propio.
-- Conserva varias soluciones vivas y fuerza diversidad al elegir las tres opciones.
-- Una estrategia nueva nunca reemplaza la base si carga menos pallets o menos pilas.
-- Búsqueda rápida de 9 segundos y portafolio profundo hasta completar 30 segundos.
-- Mantiene carga pendiente, autocompletado, reconstrucción profunda y memoria de estrategias.
-- Caché actualizada a v5.8.
+Esta versión agrega un segundo optimizador especializado en escapar de soluciones locales donde siempre quedan una o dos pilas fuera.
+
+La solución base nunca se elimina. El motor crea copias y reconstruye regiones grandes —frente, centro, parte trasera o toda la carga móvil— priorizando las pilas pendientes. Solo adopta el nuevo plano cuando iguala o mejora el resultado anterior y pasa la validación de límites y colisiones.

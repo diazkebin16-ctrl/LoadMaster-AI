@@ -488,6 +488,77 @@ class LoadEngine {
     return candidates;
   }
 
+
+  optimumEscapeRescue(placed,unplaced,originals){
+    // Segundo optimizador independiente: abandona el óptimo local y reconstruye
+    // zonas grandes con las pilas pendientes como objetivo obligatorio.
+    const missing=(unplaced||[]).map(Geometry.clone);
+    if(!missing.length||missing.length>2)return [];
+    const movable=placed.filter(s=>!s.locked);
+    if(movable.length<6)return [];
+    const candidates=[], seenSets=new Set();
+    const used=Math.max(1,Geometry.usedLength(placed));
+    const fractions=[0.35,0.50,0.65,0.80,1.0];
+    const windows=[];
+    for(const f of fractions){
+      const depth=used*f;
+      windows.push([Math.max(0,used-depth),used]);          // zona trasera
+      windows.push([0,Math.min(used,depth)]);              // zona delantera
+      const mid=used/2; windows.push([Math.max(0,mid-depth/2),Math.min(used,mid+depth/2)]); // centro
+    }
+    const removalSets=[];
+    for(const [a,b] of windows){
+      const zone=movable.filter(s=>s.y < b && s.y+s.l > a);
+      if(zone.length>=6)removalSets.push(zone);
+    }
+    const byArea=[...movable].sort((a,b)=>b.w*b.l-a.w*a.l);
+    const byEnd=[...movable].sort((a,b)=>(b.y+b.l)-(a.y+a.l));
+    const byWidth=[...movable].sort((a,b)=>b.w-a.w||b.l-a.l);
+    for(const f of fractions){
+      const n=Math.max(6,Math.min(movable.length,Math.ceil(movable.length*f)));
+      removalSets.push(byArea.slice(0,n),byEnd.slice(0,n),byWidth.slice(0,n));
+    }
+    removalSets.push(movable);
+
+    for(const removedList of removalSets){
+      if(!this.hasTime())break;
+      const ids=[...new Set(removedList.map(s=>s.id))];
+      const key=ids.slice().sort().join('|');
+      if(ids.length<6||seenSets.has(key))continue;
+      seenSets.add(key);
+      const removed=new Set(ids);
+      const base=placed.filter(s=>s.locked||!removed.has(s.id));
+      if(!validateLayout(base,this.trailer).ok)continue;
+      const removedPieces=placed.filter(s=>removed.has(s.id));
+      const pool=[...missing,...removedPieces];
+      const rest=pool.filter(s=>!missing.some(m=>m.id===s.id));
+      const orders=[
+        [...missing,...rest].sort((a,b)=>{
+          const am=missing.some(m=>m.id===a.id)?0:1,bm=missing.some(m=>m.id===b.id)?0:1;
+          return am-bm||b.w*b.l-a.w*a.l;
+        }),
+        [...missing,...rest.sort((a,b)=>a.w*a.l-b.w*b.l)],
+        [...missing,...rest.sort((a,b)=>b.w-a.w||b.l-a.l)],
+        ...this.rowCombinationOrders(pool),
+        ...this.orders(pool).slice(0,14)
+      ];
+      const seenOrders=new Set();
+      for(const order of orders){
+        if(!this.hasTime())break;
+        const okey=order.map(s=>s.id).join('|');
+        if(seenOrders.has(okey))continue; seenOrders.add(okey);
+        const beam=pool.length>32?520:pool.length>20?760:980;
+        const result=this.packPartial(order,base,originals,beam);
+        if(!result||!validateLayout(result.stacks,this.trailer).ok)continue;
+        const placedIds=new Set(result.stacks.map(s=>s.id));
+        const stillMissing=originals.filter(s=>!placedIds.has(s.id));
+        candidates.push({name:`Escape de óptimo local (${ids.length} pilas reconstruidas)`,family:'Escape global',stacks:result.stacks,unplaced:stillMissing});
+        if(!stillMissing.length)return candidates;
+      }
+    }
+    return candidates;
+  }
+
   patternSeeds(input){
     const seeds=[];
     for(const pattern of this.patterns){
@@ -680,6 +751,27 @@ function runPortfolioSearch(input,trailer,{totalTimeMs=21000,patterns=[],strateg
     const report=engine.optimize(Geometry.clone(input));
     if(report.ok)for(const sol of report.solutions||[])all.push({...sol,portfolio:spec.profile,name:`${spec.label} · ${sol.name||'resultado'}`});
   }
+  // Segunda etapa especializada: parte de las mejores soluciones parciales y
+  // reconstruye regiones grandes para escapar del óptimo local.
+  const escapeSeeds=[...all].filter(s=>s&&Array.isArray(s.stacks)&&(s.unplaced||[]).length>0&&(s.unplaced||[]).length<=2)
+    .sort((a,b)=>(b.loadedPallets||0)-(a.loadedPallets||0)||(b.loadedStacks||0)-(a.loadedStacks||0)).slice(0,3);
+  for(let i=0;i<escapeSeeds.length;i++){
+    const elapsed=Date.now()-started,remaining=totalTimeMs-elapsed;
+    if(remaining<120)break;
+    const seed=escapeSeeds[i];
+    const engine=new LoadEngine(trailer,{timeLimitMs:remaining,patterns:[],strategies,seedOffset:211+i*97,profile:'restart'});
+    for(const sol of engine.optimumEscapeRescue(Geometry.clone(seed.stacks),Geometry.clone(seed.unplaced||[]),Geometry.clone(input))){
+      Object.assign(sol,engine.metrics(sol.stacks,input));
+      sol.loadedStacks=sol.stacks.length;
+      sol.loadedPallets=sol.stacks.reduce((n,x)=>n+(Number(x.qty)||1),0);
+      sol.unplacedStacks=(sol.unplaced||[]).length;
+      sol.unplacedPallets=(sol.unplaced||[]).reduce((n,x)=>n+(Number(x.qty)||1),0);
+      all.push(sol);
+      if(!sol.unplacedStacks)break;
+    }
+    if(all.some(s=>(s.unplacedStacks===0)||((s.unplaced||[]).length===0)))break;
+  }
+
   const valid=[];
   for(const sol of all){
     if(!sol||!Array.isArray(sol.stacks)||!validateLayout(sol.stacks,trailer).ok)continue;

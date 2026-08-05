@@ -1,0 +1,23 @@
+const fs=require('fs'),vm=require('vm');
+let src=fs.readFileSync('app.js','utf8');
+src=src.replace(/new App\(\);\s*$/,'globalThis.__LM={LoadEngine,validateLayout,Geometry};');
+const sandbox={console,Date,Math,setTimeout:()=>{},clearTimeout:()=>{},localStorage:{getItem:()=>null,setItem:()=>{}},document:{getElementById:()=>({}),querySelector:()=>null},window:{addEventListener:()=>{}},navigator:{},crypto:{randomUUID:()=>String(Math.random())}};
+vm.createContext(sandbox);vm.runInContext(src,sandbox);
+const {LoadEngine,validateLayout}=sandbox.__LM;
+const mk=(id,x,y)=>({id,name:id,w:32,l:30,x,y,qty:1,type:'4-way',canRotate:true,locked:false});
+const trailer={width:96,length:120};
+const originals=[];let n=0;
+for(let row=0;row<4;row++)for(let col=0;col<3;col++)originals.push(mk(`p${++n}`,col*32,row*30));
+// Plano parcial que exige reconstruir una zona amplia para recuperar dos piezas.
+const placed=originals.slice(0,10).map((s,i)=>({...s,x:(i%2)*32,y:Math.floor(i/2)*30}));
+const missing=originals.slice(10);
+const engine=new LoadEngine(trailer,{timeLimitMs:8000,seedOffset:991,profile:'restart'});
+const out=engine.optimumEscapeRescue(placed,missing,originals);
+if(!out.length)throw new Error('El segundo optimizador no produjo candidatos');
+out.sort((a,b)=>a.unplaced.length-b.unplaced.length);
+const best=out[0];
+if(best.unplaced.length!==0)throw new Error(`El escape de óptimo dejó ${best.unplaced.length} pilas fuera`);
+if(best.stacks.length!==12)throw new Error(`Se esperaban 12 pilas, se obtuvieron ${best.stacks.length}`);
+if(!validateLayout(best.stacks,trailer).ok)throw new Error('El escape produjo un layout inválido');
+if(!/Escape de óptimo local/.test(best.name))throw new Error('No se ejecutó la fase especializada');
+console.log('PASS v5.9: segundo optimizador escapó del óptimo local y recuperó dos pilas.');

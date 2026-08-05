@@ -1,14 +1,18 @@
-# Informe de pruebas — LoadMaster AI v5.8 PORTFOLIO SEARCH
+# LoadMaster AI v5.9 OPTIMUM ESCAPE — reporte de pruebas
 
-Todas las pruebas automáticas de las versiones v5.0 a v5.8 fueron ejecutadas durante el desarrollo. La prueba nueva confirmó cuatro búsquedas independientes, diversidad entre opciones y preservación de la mejor solución anterior.
+## Cambio principal
+- Segundo optimizador independiente para casos con 1–2 pilas pendientes.
+- Conserva la mejor solución anterior como respaldo.
+- Reconstruye zonas delanteras, centrales y traseras, entre 35 % y 100 % de la carga móvil.
+- Prioriza explícitamente las pilas pendientes durante la reconstrucción.
+- Solo acepta soluciones válidas que igualen o mejoren el piso anterior.
 
-También se verificó:
-- carga parcial y pendientes;
-- combinaciones de ancho;
-- reconstrucción después de mover tres pilas;
-- rescate de dos pilas;
-- reconstrucción amplia;
-- autocompletado compatible con medidas antiguas;
-- ausencia de errores de sintaxis en app.js y optimizer.js.
+## Validaciones ejecutadas
+- Sintaxis de `app.js` y `optimizer.js`.
+- Pruebas de regresión v5.0–v5.8.
+- Prueba v5.9: recuperación de dos pilas mediante reconstrucción amplia.
+- Validación de límites y colisiones.
+- Integridad del ZIP.
 
-La carga real del usuario continúa siendo la prueba definitiva. Estas verificaciones no garantizan matemáticamente encontrar siempre el óptimo global.
+## Resultado
+Todas las pruebas pasaron. La carga real del usuario continúa siendo el benchmark definitivo.
