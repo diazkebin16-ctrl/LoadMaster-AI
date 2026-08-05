@@ -141,10 +141,12 @@ function selectDiverseSolutions(sorted,limit,trailer){
 }
 
 class LoadEngine {
-  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[]}={}){
+  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[],seedOffset=0,profile='balanced'}={}){
     this.trailer=Geometry.clone(trailer);
     this.patterns=Array.isArray(patterns)?Geometry.clone(patterns):[];
     this.strategies=Array.isArray(strategies)?Geometry.clone(strategies):[];
+    this.seedOffset=Number(seedOffset)||0;
+    this.profile=String(profile||'balanced');
     this.deadline=Date.now()+timeLimitMs;
     this.timedOut=false;
   }
@@ -187,7 +189,7 @@ class LoadEngine {
       [...movable].sort((a,b)=>a.y-b.y||a.x-b.x),
       [...movable].sort((a,b)=>(isFourWay(b)?1:0)-(isFourWay(a)?1:0)||b.w*b.l-a.w*a.l)
     ];
-    let seed=2166136261;
+    let seed=(2166136261 ^ ((this.seedOffset+1)*2654435761))>>>0;
     for(const s of movable)for(const ch of String(s.id))seed=(seed^ch.charCodeAt(0))*16777619>>>0;
     const rnd=()=>((seed=1664525*seed+1013904223>>>0)/4294967296);
     const randomOrders=movable.length>28?2:movable.length>18?4:8;
@@ -201,12 +203,15 @@ class LoadEngine {
 
   familyOrders(movable){
     const original=[...movable];
-    return [
+    const groups=[
       {family:'Conservadora',name:'Conservadora · grandes primero',orders:[[...original].sort((a,b)=>b.w*b.l-a.w*a.l||b.l-a.l),[...original].sort((a,b)=>Math.max(b.w,b.l)-Math.max(a.w,a.l)||b.w*b.l-a.w*a.l)]},
       {family:'Compacta',name:'Compacta · pequeñas y huecos primero',orders:[[...original].sort((a,b)=>a.w*a.l-b.w*b.l||a.l-b.l),[...original].sort((a,b)=>Math.min(a.w,a.l)-Math.min(b.w,b.l)||a.w*a.l-b.w*b.l)]},
       {family:'Filas',name:'Filas · combinaciones de ancho',orders:[...this.rowCombinationOrders(original).slice(0,8),[...original].sort((a,b)=>b.w-a.w||a.l-b.l)]},
-      {family:'Reinicio',name:'Reinicio · orden inverso y mezclado',orders:[[...original].sort((a,b)=>b.l-a.l||a.w-b.w),[...original].sort((a,b)=>a.l-b.l||b.w-a.w),[...original].reverse()]}
+      {family:'Reinicio',name:'Reinicio total · orden inverso y mezclado',orders:[[...original].sort((a,b)=>b.l-a.l||a.w-b.w),[...original].sort((a,b)=>a.l-b.l||b.w-a.w),[...original].reverse()]}
     ];
+    const preferred={large:'Conservadora',small:'Compacta',rows:'Filas',restart:'Reinicio'}[this.profile];
+    if(!preferred)return groups;
+    return [...groups.filter(g=>g.family===preferred),...groups.filter(g=>g.family!==preferred)];
   }
 
   strategyOrders(movable){
@@ -758,6 +763,36 @@ class LoadEngine {
   }
 }
 
+
+function runPortfolioSearch(input,trailer,{totalTimeMs=21000,patterns=[],strategies=[],baselineSolutions=[]}={}){
+  const profiles=[
+    {profile:'large',seedOffset:11,label:'Portafolio · grandes primero'},
+    {profile:'small',seedOffset:37,label:'Portafolio · pequeñas primero'},
+    {profile:'rows',seedOffset:73,label:'Portafolio · filas y huecos'},
+    {profile:'restart',seedOffset:109,label:'Portafolio · reinicio total'}
+  ];
+  const started=Date.now(), all=[...(baselineSolutions||[])];
+  const bestBaseline=(baselineSolutions||[]).slice().sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score)[0]||null;
+  for(let i=0;i<profiles.length;i++){
+    const elapsed=Date.now()-started,remaining=totalTimeMs-elapsed;
+    if(remaining<80)break;
+    const slots=profiles.length-i;
+    const budget=Math.max(80,Math.floor(remaining/slots));
+    const spec=profiles[i];
+    const engine=new LoadEngine(trailer,{timeLimitMs:budget,patterns:i===0?patterns:[],strategies,seedOffset:spec.seedOffset,profile:spec.profile});
+    const report=engine.optimize(Geometry.clone(input));
+    if(report.ok)for(const sol of report.solutions||[])all.push({...sol,portfolio:spec.profile,name:`${spec.label} · ${sol.name||'resultado'}`});
+  }
+  const valid=[];
+  for(const sol of all){
+    if(!sol||!Array.isArray(sol.stacks)||!validateLayout(sol.stacks,trailer).ok)continue;
+    if(bestBaseline && (sol.loadedPallets<bestBaseline.loadedPallets || (sol.loadedPallets===bestBaseline.loadedPallets&&sol.loadedStacks<bestBaseline.loadedStacks)))continue;
+    valid.push(sol);
+  }
+  valid.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
+  return {ok:valid.length>0,solutions:selectDiverseSolutions(valid,3,trailer),attemptedProfiles:profiles.length,elapsedMs:Date.now()-started};
+}
+
 // ===== app.js =====
 
 
@@ -984,11 +1019,9 @@ function normalizeLibraryItem(raw={}){
         if(!fastBest||!fastBest.unplacedStacks){this.toast("Optimización terminada");return;}
         $("optimizerSummary").textContent+=` · Búsqueda profunda activa hasta 30 segundos…`;
         setTimeout(()=>{
-          const deep=new LoadEngine(this.state.trailer,{timeLimitMs:21000,patterns:[],strategies:this.strategyMemory.items});const deepReport=deep.optimize(original);
-          if(!deepReport.ok)return;
-          const candidates=[...(fastReport.solutions||[]),...(deepReport.solutions||[])];
-          candidates.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
-          const merged={ok:true,solutions:selectDiverseSolutions(candidates,3,this.state.trailer)};const deepBest=applyReport(merged,"Resultado final (búsqueda 9→30 s)");
+          const merged=runPortfolioSearch(original,this.state.trailer,{totalTimeMs:21000,patterns:[],strategies:this.strategyMemory.items,baselineSolutions:fastReport.solutions||[]});
+          if(!merged.ok)return;
+          const deepBest=applyReport(merged,"Resultado final · portafolio independiente 9→30 s");
           this.toast(deepBest&&deepBest.unplacedStacks?"Se conservó la mayor carga encontrada; revisa Pendientes":"Toda la carga quedó acomodada");
         },50);
       },30);

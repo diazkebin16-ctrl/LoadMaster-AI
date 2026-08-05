@@ -1,21 +1,14 @@
-# LoadMaster AI v5.7 DIVERSE SEARCH — Reporte de pruebas
+# Informe de pruebas — LoadMaster AI v5.8 PORTFOLIO SEARCH
 
-## Objetivo
+Todas las pruebas automáticas de las versiones v5.0 a v5.8 fueron ejecutadas durante el desarrollo. La prueba nueva confirmó cuatro búsquedas independientes, diversidad entre opciones y preservación de la mejor solución anterior.
 
-Evitar que las tres alternativas sean pequeños movimientos del mismo plano y obligar al motor a explorar familias de soluciones distintas.
+También se verificó:
+- carga parcial y pendientes;
+- combinaciones de ancho;
+- reconstrucción después de mover tres pilas;
+- rescate de dos pilas;
+- reconstrucción amplia;
+- autocompletado compatible con medidas antiguas;
+- ausencia de errores de sintaxis en app.js y optimizer.js.
 
-## Verificaciones
-
-- `tests-v5.js`: PASS.
-- `tests-v5.1.js`: PASS.
-- `tests-v5.2.js`: PASS.
-- `tests-v5.3.js`: PASS.
-- `tests-v5.5.js`: PASS.
-- `tests-v5.6.js`: PASS.
-- `tests-v5.7.js`: PASS; opciones diferentes, mejor carga preservada y layouts válidos.
-- `node --check app.js`: PASS.
-- `node --check optimizer.js`: PASS.
-
-## Nota
-
-La prueba definitiva sigue siendo la carga real del usuario. Esta versión mejora la diversidad de exploración, pero no garantiza matemáticamente encontrar el óptimo global en todos los casos.
+La carga real del usuario continúa siendo la prueba definitiva. Estas verificaciones no garantizan matemáticamente encontrar siempre el óptimo global.

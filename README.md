@@ -1,11 +1,10 @@
-# LoadMaster AI v5.7 DIVERSE SEARCH
+# LoadMaster AI v5.8 PORTFOLIO SEARCH
 
-Versión basada en v5.6. Conserva la mejor solución anterior y cambia la generación de alternativas para que representen familias de búsqueda realmente distintas.
-
-## Cambios principales
-
-- Cuatro familias de búsqueda: Conservadora, Compacta, Filas y Reinicio.
-- Medición de distancia entre layouts para evitar mostrar tres opciones casi idénticas.
-- La primera opción sigue siendo la de mayor carga; las alternativas se seleccionan por diversidad sin sacrificar demasiado la calidad.
-- Se mantienen la búsqueda 9→30 segundos, reconstrucción profunda, carga pendiente, memoria de estrategias y autocompletado compatible.
-- Caché actualizada a v5.7.
+- Mantiene la mejor solución de v5.7 como piso de calidad.
+- Ejecuta cuatro optimizadores independientes: grandes, pequeñas, filas y reinicio total.
+- Cada optimizador usa una semilla distinta y un presupuesto propio.
+- Conserva varias soluciones vivas y fuerza diversidad al elegir las tres opciones.
+- Una estrategia nueva nunca reemplaza la base si carga menos pallets o menos pilas.
+- Búsqueda rápida de 9 segundos y portafolio profundo hasta completar 30 segundos.
+- Mantiene carga pendiente, autocompletado, reconstrucción profunda y memoria de estrategias.
+- Caché actualizada a v5.8.
