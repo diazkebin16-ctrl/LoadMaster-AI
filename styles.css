@@ -176,3 +176,18 @@ body{padding-bottom:92px}
   .sidebar,.workspace{width:100%;max-width:100%}
   .canvasWrap{width:100%;max-width:100%}
 }
+
+
+/* v2.0 — Fase 2: resultados del motor inteligente */
+.optimizerPanel{margin-top:1rem;background:#fff;border:1px solid var(--line);border-radius:14px;padding:1rem}
+.optimizerHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.8rem}
+.optimizerHeader p{margin-top:.2rem;color:var(--muted);font-size:.84rem}
+.optimizerResults{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem}
+.solutionCard{border:1px solid var(--line);border-radius:12px;padding:.8rem;background:#f8fafc}
+.solutionCard.best{border:2px solid var(--accent);background:#eff6ff}
+.solutionCard h3{font-size:.92rem;margin:0 0 .5rem}
+.solutionStats{display:grid;grid-template-columns:1fr 1fr;gap:.35rem;font-size:.78rem;color:var(--muted);margin-bottom:.65rem}
+.solutionStats strong{display:block;color:var(--text);font-size:.92rem}
+.solutionCard button{width:100%}
+.optimizing{opacity:.65;pointer-events:none}
+@media(max-width:900px){.optimizerResults{grid-template-columns:1fr}}

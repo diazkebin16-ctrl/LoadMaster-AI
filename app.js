@@ -129,6 +129,14 @@
     $("metricPallets").textContent=state.stacks.reduce((a,s)=>a+s.qty,0);
     $("metricUsed").textContent=`${Math.round(used)}"`;
     $("metricFree").textContent=`${Math.round(free)}"`;
+    const floorArea=state.stacks.reduce((sum,s)=>sum+s.w*s.l,0);
+    const trailerArea=Math.max(1,state.trailer.width*state.trailer.length);
+    const usedEnvelope=Math.max(1,state.trailer.width*used);
+    const util=Math.min(100,(floorArea/trailerArea)*100);
+    const efficiency=used?Math.min(100,(floorArea/usedEnvelope)*100):0;
+    const utilEl=$("metricUtilization"), effEl=$("metricEfficiency");
+    if(utilEl) utilEl.textContent=`${util.toFixed(1)}%`;
+    if(effEl) effEl.textContent=`${efficiency.toFixed(1)}%`;
     const bad=state.stacks.some(s=>!valid(s));
     $("metricStatus").textContent=bad?"Hay conflicto":"Carga válida";
     $("metricStatus").style.color=bad?"#dc2626":"#16a34a";
@@ -403,29 +411,182 @@
     if(!state.future.length)return;state.history.push(snapShot());restore(state.future.pop());
   });
 
-  function optimize(){
-    remember();
-    const locked=state.stacks.filter(s=>s.locked);
-    const moving=state.stacks.filter(s=>!s.locked).sort((a,b)=>(b.w*b.l)-(a.w*a.l));
-    state.stacks=[...locked];
-    moving.forEach(s=>{
-      const orients=[{w:s.w,l:s.l}];
-      if(s.type==="4-way"&&s.canRotate&&s.w!==s.l) orients.push({w:s.l,l:s.w});
-      let best=null;
-      orients.forEach(o=>{
-        const fit=candidatePositions(o.w,o.l)[0];
-        if(fit){
-          const score=fit.y+o.l;
-          if(!best||score<best.score) best={...fit,...o,score};
-        }
-      });
-      if(best){s.x=best.x;s.y=best.y;s.w=best.w;s.l=best.l;}
-      else{s.x=0;s.y=usedLength();}
-      state.stacks.push(s);
-    });
-    render();toast("Optimización básica terminada");
+  // FASE 2 — Motor inteligente de optimización.
+  // Genera varias soluciones completas, respeta bloqueos y rotación, y compara
+  // largo usado, huecos internos y movimiento total respecto al plano actual.
+  let optimizerSolutions=[];
+
+  function cloneStack(s){ return {...s}; }
+  function layoutUsed(items){ return items.length?Math.max(...items.map(p=>p.y+p.l)):0; }
+  function layoutArea(items){ return items.reduce((sum,p)=>sum+p.w*p.l,0); }
+  function layoutValid(items){
+    for(let i=0;i<items.length;i++){
+      const a=items[i];
+      if(a.x<0||a.y<0||a.x+a.w>state.trailer.width||a.y+a.l>state.trailer.length)return false;
+      for(let j=i+1;j<items.length;j++) if(localOverlaps(a,items[j])) return false;
+    }
+    return true;
   }
-  $("optimizeBtn").addEventListener("click",optimize);
+  function solutionStats(items){
+    const used=layoutUsed(items);
+    const area=layoutArea(items);
+    const free=Math.max(0,state.trailer.length-used);
+    const utilization=100*area/Math.max(1,state.trailer.width*state.trailer.length);
+    const efficiency=used?100*area/(state.trailer.width*used):0;
+    return {used,free,utilization,efficiency};
+  }
+  function placementKey(items){
+    return [...items].sort((a,b)=>String(a.id).localeCompare(String(b.id)))
+      .map(p=>`${p.id}:${p.x},${p.y},${p.w},${p.l}`).join('|');
+  }
+  function candidateCorners(w,l,placed){
+    const xs=new Set([0,state.trailer.width-w]);
+    const ys=new Set([0]);
+    placed.forEach(p=>{
+      xs.add(p.x); xs.add(p.x+p.w); xs.add(p.x-w); xs.add(p.x+p.w-w);
+      ys.add(p.y); ys.add(p.y+p.l); ys.add(p.y-l); ys.add(p.y+p.l-l);
+    });
+    const out=[];
+    for(const y0 of ys){
+      for(const x0 of xs){
+        const x=Math.round(x0*100)/100, y=Math.round(y0*100)/100;
+        const piece={x,y,w,l};
+        if(fitsPlacement(piece,placed)) out.push(piece);
+      }
+    }
+    out.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||a.y-b.y||a.x-b.x);
+    return out.slice(0,36);
+  }
+  function smartScore(placed, originalById){
+    const used=layoutUsed(placed);
+    const area=layoutArea(placed);
+    const empty=Math.max(0,state.trailer.width*used-area);
+    let movement=0, side=0;
+    placed.forEach(p=>{
+      side+=p.x;
+      const o=originalById.get(p.id);
+      if(o) movement+=Math.abs(p.x-o.x)+Math.abs(p.y-o.y)+(p.w!==o.w?4:0);
+    });
+    return used*1e8 + empty*1e3 + movement*5 + side;
+  }
+  function seededShuffle(items,seed){
+    const a=[...items]; let x=seed>>>0;
+    for(let i=a.length-1;i>0;i--){
+      x=(1664525*x+1013904223)>>>0;
+      const j=x%(i+1); [a[i],a[j]]=[a[j],a[i]];
+    }
+    return a;
+  }
+  function intelligentOrders(items){
+    const candidates=[
+      [...items].sort((a,b)=>(b.w*b.l)-(a.w*a.l)),
+      [...items].sort((a,b)=>b.l-a.l||b.w-a.w),
+      [...items].sort((a,b)=>b.w-a.w||b.l-a.l),
+      [...items].sort((a,b)=>Math.max(b.w,b.l)-Math.max(a.w,a.l)),
+      [...items].sort((a,b)=>a.y-b.y||a.x-b.x)
+    ];
+    for(let seed=1;seed<=18;seed++) candidates.push(seededShuffle(items,seed*7919));
+    const seen=new Set();
+    return candidates.filter(order=>{const k=order.map(x=>x.id).join('|');if(seen.has(k))return false;seen.add(k);return true;});
+  }
+  function beamPack(order,locked,deadline,originalById){
+    let beam=[{placed:locked.map(cloneStack),moves:[],score:0}];
+    const width=order.length<=12?180:order.length<=24?110:65;
+    for(const source of order){
+      if(performance.now()>deadline) return null;
+      const next=[];
+      const orientations=[{w:source.w,l:source.l}];
+      if(source.type==='4-way'&&source.canRotate&&source.w!==source.l) orientations.push({w:source.l,l:source.w});
+      for(const node of beam){
+        for(const o of orientations){
+          for(const pos of candidateCorners(o.w,o.l,node.placed)){
+            const piece={...source,x:pos.x,y:pos.y,w:o.w,l:o.l};
+            const placed=[...node.placed,piece];
+            next.push({placed,moves:[...node.moves,piece],score:smartScore(placed,originalById)});
+          }
+        }
+      }
+      if(!next.length)return null;
+      next.sort((a,b)=>a.score-b.score);
+      const unique=[], keys=new Set();
+      for(const n of next){
+        const k=n.moves.map(p=>`${p.x},${p.y},${p.w},${p.l}`).join(';');
+        if(keys.has(k))continue; keys.add(k); unique.push(n);
+        if(unique.length>=width)break;
+      }
+      beam=unique;
+    }
+    beam.sort((a,b)=>a.score-b.score);
+    return beam[0]||null;
+  }
+  function feasibilityCheck(){
+    const badSize=state.stacks.find(s=>{
+      const normal=s.w<=state.trailer.width&&s.l<=state.trailer.length;
+      const rotated=s.type==='4-way'&&s.canRotate&&s.l<=state.trailer.width&&s.w<=state.trailer.length;
+      return !normal&&!rotated;
+    });
+    if(badSize)return `La pila ${badSize.name} no cabe por sus dimensiones.`;
+    const totalArea=layoutArea(state.stacks);
+    if(totalArea>state.trailer.width*state.trailer.length)return 'La carga supera el área total disponible del tráiler.';
+    const locked=state.stacks.filter(s=>s.locked);
+    if(!layoutValid(locked))return 'Las pilas bloqueadas están fuera del tráiler o se superponen.';
+    return null;
+  }
+  async function runIntelligentOptimizer(){
+    const problem=feasibilityCheck();
+    if(problem){toast(problem);return;}
+    const panel=$("optimizerPanel"), results=$("optimizerResults"), summary=$("optimizerSummary");
+    panel.hidden=false; results.innerHTML=''; summary.textContent='Analizando órdenes, rotaciones y espacios disponibles…';
+    document.body.classList.add('optimizing');
+    await new Promise(r=>setTimeout(r,40));
+    const locked=state.stacks.filter(s=>s.locked).map(cloneStack);
+    const moving=state.stacks.filter(s=>!s.locked).map(cloneStack);
+    const originalById=new Map(state.stacks.map(s=>[s.id,s]));
+    const deadline=performance.now()+Math.min(8000,2200+moving.length*180);
+    const found=[], keys=new Set();
+    for(const order of intelligentOrders(moving)){
+      if(performance.now()>deadline)break;
+      const node=beamPack(order,locked,deadline,originalById);
+      if(!node)continue;
+      const all=node.placed;
+      if(all.length!==state.stacks.length||!layoutValid(all))continue;
+      const key=placementKey(all);if(keys.has(key))continue;keys.add(key);
+      found.push({items:all,score:smartScore(all,originalById),stats:solutionStats(all)});
+      found.sort((a,b)=>a.score-b.score);
+      if(found.length>8)found.length=8;
+    }
+    document.body.classList.remove('optimizing');
+    if(!found.length){summary.textContent='No se encontró un acomodo completo válido.';toast('La carga no pudo acomodarse automáticamente');return;}
+    optimizerSolutions=found.slice(0,3);
+    const current=solutionStats(state.stacks);
+    const best=optimizerSolutions[0].stats;
+    summary.textContent=`${optimizerSolutions.length} solución(es) · mejor resultado: ${Math.round(best.used)}" usados, ${Math.round(best.free)}" libres.`;
+    results.innerHTML='';
+    optimizerSolutions.forEach((sol,i)=>{
+      const card=document.createElement('article');card.className='solutionCard'+(i===0?' best':'');
+      const saved=Math.max(0,current.used-sol.stats.used);
+      card.innerHTML=`<h3>${i===0?'⭐ Mejor solución':`Alternativa ${i+1}`}</h3><div class="solutionStats">
+        <span>Largo usado<strong>${Math.round(sol.stats.used)}"</strong></span>
+        <span>Libre al final<strong>${Math.round(sol.stats.free)}"</strong></span>
+        <span>Eficiencia<strong>${sol.stats.efficiency.toFixed(1)}%</strong></span>
+        <span>Reducción<strong>${Math.round(saved)}"</strong></span>
+      </div><button class="${i===0?'primary':''}" data-solution="${i}">Aplicar esta solución</button>`;
+      results.appendChild(card);
+    });
+    toast('Optimización inteligente terminada');
+  }
+  function applyOptimizerSolution(index){
+    const sol=optimizerSolutions[index];if(!sol)return;
+    remember();
+    const map=new Map(sol.items.map(p=>[p.id,p]));
+    state.stacks.forEach(s=>Object.assign(s,map.get(s.id)||{}));
+    render();$("optimizerPanel").hidden=true;toast('Solución aplicada');
+  }
+  $("optimizerResults").addEventListener('click',e=>{
+    const b=e.target.closest('[data-solution]');if(b)applyOptimizerSolution(+b.dataset.solution);
+  });
+  $("closeOptimizer").addEventListener('click',()=>$("optimizerPanel").hidden=true);
+  $("optimizeBtn").addEventListener("click",runIntelligentOptimizer);
 
   // Motor de compactación avanzada: reconstruye únicamente las pilas desbloqueadas
   // usando búsqueda por esquinas, varias órdenes de colocación y un beam search limitado.
@@ -593,7 +754,7 @@
       .stack{position:absolute;border:2px solid #16a34a;background:#dbeafe;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10px;font-weight:bold;overflow:hidden}
       .freeZone{position:absolute;left:0;right:0;bottom:0;background:#dcfce7}.noseTag,.doorTag{position:absolute;left:50%;transform:translateX(-50%);font-weight:bold}
       .noseTag{top:2px}.doorTag{bottom:2px}</style></head><body>
-      <h1>LoadMaster AI — Plano de carga</h1>
+      <h1>LoadMaster AI v2.0 — Plano de carga</h1>
       <p>Tráiler ${state.trailer.width}" × ${state.trailer.length}" · ${state.stacks.length} pilas · ${Math.max(0,state.trailer.length-usedLength())}" libres al final</p>
       </body></html>`);
     w.document.body.appendChild(clone);w.document.close();w.focus();setTimeout(()=>w.print(),300);

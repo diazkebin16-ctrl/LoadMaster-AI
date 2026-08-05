@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 1.0</title>
+  <title>LoadMaster AI 2.0 — Fase 2</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,7 +12,7 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>La IA que aprende a cargar como tú. · v1.0</p>
+    <p>Motor inteligente de optimización · v2.0</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
@@ -110,7 +110,7 @@
         <button id="undoBtn">Deshacer</button>
         <button id="redoBtn">Rehacer</button>
         <button id="compactBtn">Compactar</button>
-        <button id="optimizeBtn" class="primary">Optimizar libres</button>
+        <button id="optimizeBtn" class="primary">Optimización IA</button>
         <button id="clearBtn">Vaciar carga</button>
         <button id="demoBtn">Cargar ejemplo</button>
       </div>
@@ -131,6 +131,8 @@
       <div><span>Pallets</span><strong id="metricPallets">0</strong></div>
       <div><span>Largo usado</span><strong id="metricUsed">0"</strong></div>
       <div><span>Libre al final</span><strong id="metricFree">628"</strong></div>
+      <div><span>Uso del piso</span><strong id="metricUtilization">0%</strong></div>
+      <div><span>Eficiencia</span><strong id="metricEfficiency">0%</strong></div>
       <div class="wide"><span>Estado</span><strong id="metricStatus">Carga válida</strong></div>
     </section>
   </aside>
@@ -157,6 +159,13 @@
       </div>
     </div>
     <p class="tip">Consejo: bloquea las pilas que no quieras que la optimización mueva.</p>
+    <section id="optimizerPanel" class="optimizerPanel" hidden>
+      <div class="optimizerHeader">
+        <div><strong>Resultados de optimización</strong><p id="optimizerSummary">Buscando soluciones…</p></div>
+        <button id="closeOptimizer" type="button">Cerrar</button>
+      </div>
+      <div id="optimizerResults" class="optimizerResults"></div>
+    </section>
   </section>
 </main>
 
