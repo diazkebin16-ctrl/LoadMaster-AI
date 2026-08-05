@@ -1,4 +1,4 @@
-const CACHE="loadmaster-ai-v0.6-scroll-bottombar";
+const CACHE="loadmaster-ai-v0.7-scroll-fixed";
 const ASSETS=["./","./index.html","./styles.css","./app.js","./manifest.webmanifest","./icon.svg"];
 
 self.addEventListener("install",event=>{

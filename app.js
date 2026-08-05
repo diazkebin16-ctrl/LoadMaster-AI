@@ -92,7 +92,7 @@
       rotate.title=can?"Girar pila":"Esta pila no se puede girar";
     }
     if(lock){
-      lock.textContent=s.locked?"🔓 Desbloquear":"🔒 Bloquear";
+      lock.textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";
       lock.title=s.locked?"Desbloquear":"Bloquear";
     }
   }
@@ -284,12 +284,26 @@
 
 
 
-  trailerEl.addEventListener("click",e=>{
+  let backgroundPointerStart=null;
+  trailerEl.addEventListener("pointerdown",e=>{
     if(e.target===trailerEl || e.target.classList.contains("freeZone")){
+      backgroundPointerStart={x:e.clientX,y:e.clientY};
+    }else{
+      backgroundPointerStart=null;
+    }
+  },{passive:true});
+  trailerEl.addEventListener("pointerup",e=>{
+    if(!backgroundPointerStart) return;
+    const moved=Math.hypot(
+      e.clientX-backgroundPointerStart.x,
+      e.clientY-backgroundPointerStart.y
+    );
+    backgroundPointerStart=null;
+    if(moved<6){
       state.selectedId=null;
       render();
     }
-  });
+  },{passive:true});
 
   $("floatRotateBtn").addEventListener("click",()=>{
     $("rotateBtn").click();
