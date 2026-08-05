@@ -65,9 +65,46 @@
     return !state.stacks.some(o=>o.id!==ignore&&overlaps(s,o));
   }
   function usedLength(){
-    return state.stacks.length ? Math.max(...state.stacks.map(s=>s.y+s.l)) : 0;
+    const insideEnds=state.stacks
+      .filter(s=>s.y < state.trailer.length && s.x < state.trailer.width && s.x+s.w > 0 && s.y+s.l > 0)
+      .map(s=>Math.min(state.trailer.length,Math.max(0,s.y+s.l)));
+    return insideEnds.length ? Math.max(...insideEnds) : 0;
   }
   function selected(){ return state.stacks.find(s=>s.id===state.selectedId); }
+
+  function updateFloatingTools(){
+    const tools=$("floatingTools");
+    const s=selected();
+    if(!tools||!s){
+      if(tools) tools.hidden=true;
+      return;
+    }
+    tools.hidden=false;
+
+    // Prefer above the selected stack. If too close to the top, show below it.
+    const centerX=(s.x+s.w/2)*SCALE;
+    let topY=s.y*SCALE;
+    let translateY="-115%";
+    if(topY<55){
+      topY=(s.y+s.l)*SCALE+8;
+      translateY="0";
+    }
+    tools.style.left=`${centerX}px`;
+    tools.style.top=`${topY}px`;
+    tools.style.transform=`translate(-50%, ${translateY})`;
+
+    const rotate=$("floatRotateBtn");
+    const lock=$("floatLockBtn");
+    if(rotate){
+      const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;
+      rotate.disabled=!can;
+      rotate.title=can?"Girar pila":"Esta pila no se puede girar";
+    }
+    if(lock){
+      lock.textContent=s.locked?"🔓":"🔒";
+      lock.title=s.locked?"Desbloquear":"Bloquear";
+    }
+  }
 
   function splitQty(total,max){
     const result=[];
@@ -125,7 +162,7 @@
       trailerEl.appendChild(el);
       wireDrag(el,s);
     });
-    updateSelected(); updateMetrics(); renderLibrary();
+    updateSelected(); updateMetrics(); renderLibrary(); updateFloatingTools();
   }
 
   function edgePoints(s){
@@ -202,15 +239,13 @@
       if(cancelled){
         s.x=original.x;s.y=original.y;
       }else if(moved){
+        // En modo editor libre la pila puede quedar fuera del tráiler
+        // o temporalmente encima de otra. El color rojo indica conflicto.
         snapStack(s);
-        if(!valid(s)){
-          s.x=original.x;s.y=original.y;
-          toast("Ese espacio no es válido");
-        }else{
-          state.history.push(historyBefore);
-          if(state.history.length>80)state.history.shift();
-          state.future=[];
-        }
+        state.history.push(historyBefore);
+        if(state.history.length>80)state.history.shift();
+        state.future=[];
+        if(!valid(s)) toast("Pila fuera o en conflicto; puedes seguir acomodándola");
       }
       activePointer=null;
       render();
@@ -254,6 +289,17 @@
     saveLibrary(); toast("Medida guardada en la biblioteca");
   }
 
+
+  $("floatRotateBtn").addEventListener("click",()=>{
+    $("rotateBtn").click();
+  });
+  $("floatLockBtn").addEventListener("click",()=>{
+    $("lockBtn").click();
+  });
+  $("floatDeleteBtn").addEventListener("click",()=>{
+    $("deleteBtn").click();
+  });
+
   $("trailerPreset").addEventListener("change",()=>{
     const v=$("trailerPreset").value;
     if(v!=="custom"){[$("trailerWidth").value,$("trailerLength").value]=presets[v];}
@@ -291,23 +337,15 @@
   $("rotateBtn").addEventListener("click",()=>{
     const s=selected(); if(!s) return toast("Selecciona una pila");
     if(s.type==="2-way"||!s.canRotate) return toast("Esta pila es 2-way o tiene el giro desactivado");
-    if(s.w===s.l) return toast("Esta pila es cuadrada; girarla no cambia su posición");
+    if(s.w===s.l) return toast("Esta pila es cuadrada; girarla no cambia sus medidas");
     const before=snapShot();
-    const old={w:s.w,l:s.l,x:s.x,y:s.y};
     [s.w,s.l]=[s.l,s.w];
-    if(!valid(s)){
-      const fits=candidatePositions(s.w,s.l,s.id);
-      if(fits.length){
-        fits.sort((a,b)=>Math.abs(a.x-old.x)+Math.abs(a.y-old.y)-Math.abs(b.x-old.x)-Math.abs(b.y-old.y));
-        s.x=fits[0].x;s.y=fits[0].y;
-        toast("Pila girada y reubicada automáticamente");
-      }else{
-        Object.assign(s,old);
-        toast("No existe espacio válido para girarla");
-        render();return;
-      }
-    }
-    state.history.push(before);state.future=[];render();
+    state.history.push(before);
+    if(state.history.length>80) state.history.shift();
+    state.future=[];
+    render();
+    if(!valid(s)) toast("Pila girada; quedó fuera o en conflicto");
+    else toast("Pila girada");
   });
   $("lockBtn").addEventListener("click",()=>{
     const s=selected();if(!s)return toast("Selecciona una pila");
@@ -330,12 +368,12 @@
     const s=selected();if(!s)return toast("Selecciona una pila");
     if(s.locked)return toast("Desbloquea la pila para moverla");
     const before=snapShot();
-    const ox=s.x,oy=s.y;
     s.x+=dx;s.y+=dy;
-    if(!valid(s)){
-      s.x=ox;s.y=oy;toast("No puede moverse hacia ahí");return;
-    }
-    state.history.push(before);state.future=[];render();
+    state.history.push(before);
+    if(state.history.length>80) state.history.shift();
+    state.future=[];
+    render();
+    if(!valid(s)) toast("Pila fuera o en conflicto");
   }
   function moveStep(){return +$("moveStep").value||1;}
   $("moveUpBtn").addEventListener("click",()=>nudgeSelected(0,-moveStep()));
@@ -377,10 +415,17 @@
   $("compactBtn").addEventListener("click",()=>{
     remember();
     state.stacks.filter(s=>!s.locked).sort((a,b)=>a.y-b.y).forEach(s=>{
-      let changed=true;
-      while(changed){
-        changed=false;const old=s.y;s.y=Math.max(0,s.y-1);
-        if(valid(s)) changed=true; else s.y=old;
+      let steps=0;
+      const maxSteps=Math.max(1,Math.ceil(state.trailer.length)+5);
+      while(s.y>0 && steps<maxSteps){
+        const oldY=s.y;
+        s.y=Math.max(0,s.y-1);
+        if(!valid(s)){
+          s.y=oldY;
+          break;
+        }
+        if(s.y===oldY) break;
+        steps++;
       }
       snapStack(s);
     });
