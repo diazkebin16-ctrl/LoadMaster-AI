@@ -1,3 +1,3 @@
-# LoadMaster AI v4.2
+LoadMaster AI v4.3
 
-Versión correctiva basada en la interfaz funcional v4.0. Restaura la configuración completa del tráiler, creación y guardado de medidas, biblioteca, edición y herramientas. Mantiene la búsqueda por secuencias y rotaciones de v4.1 dentro del motor, sin reemplazar la interfaz.
+Versión funcional sin imports de módulos. Todos los controles y el motor están integrados en app.js para evitar fallos de carga de la carpeta engine en GitHub Pages/PWA.

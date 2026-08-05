@@ -1,8 +1,291 @@
-import { Geometry, EPS, roundQuarter } from "./engine/geometry.js";
-import { LoadEngine } from "./engine/optimizer.js";
-import { validateLayout, explainValidation } from "./engine/validator.js";
-
 "use strict";
+
+// ===== engine/geometry.js =====
+const EPS = 1e-7;
+const roundQuarter = n => Math.round(n * 4) / 4;
+
+class Geometry {
+  static clone(v) { return JSON.parse(JSON.stringify(v)); }
+  static normalize(s) { return {...s, x:roundQuarter(Number(s.x)||0), y:roundQuarter(Number(s.y)||0), w:Number(s.w), l:Number(s.l)}; }
+  static overlaps(a,b) {
+    return a.x < b.x+b.w-EPS && a.x+a.w > b.x+EPS && a.y < b.y+b.l-EPS && a.y+a.l > b.y+EPS;
+  }
+  static inside(s,t) {
+    return Number.isFinite(s.x)&&Number.isFinite(s.y)&&Number.isFinite(s.w)&&Number.isFinite(s.l)&&s.w>0&&s.l>0&&s.x>=-EPS&&s.y>=-EPS&&s.x+s.w<=t.width+EPS&&s.y+s.l<=t.length+EPS;
+  }
+  static valid(s,placed,t,ignoreId=null) { return Geometry.inside(s,t)&&!placed.some(o=>o.id!==ignoreId&&Geometry.overlaps(s,o)); }
+  static usedLength(stacks) { return stacks.length?Math.max(...stacks.map(s=>s.y+s.l)):0; }
+  static floorArea(stacks) { return stacks.reduce((a,s)=>a+s.w*s.l,0); }
+  static contactScore(s,others,t) {
+    let score=0;
+    if(Math.abs(s.x)<EPS||Math.abs(s.x+s.w-t.width)<EPS) score+=s.l;
+    if(Math.abs(s.y)<EPS) score+=s.w;
+    for(const o of others){
+      const vo=Math.max(0,Math.min(s.y+s.l,o.y+o.l)-Math.max(s.y,o.y));
+      const ho=Math.max(0,Math.min(s.x+s.w,o.x+o.w)-Math.max(s.x,o.x));
+      if(Math.abs(s.x+s.w-o.x)<EPS||Math.abs(o.x+o.w-s.x)<EPS)score+=vo;
+      if(Math.abs(s.y+s.l-o.y)<EPS||Math.abs(o.y+o.l-s.y)<EPS)score+=ho;
+    }
+    return score;
+  }
+  static axes(shape,placed,t) {
+    const xs=new Set([0,roundQuarter(t.width-shape.w)]), ys=new Set([0]);
+    for(const o of placed){
+      [o.x,o.x+o.w,o.x-shape.w,o.x+o.w-shape.w].forEach(v=>xs.add(roundQuarter(v)));
+      [o.y,o.y+o.l,o.y-shape.l,o.y+o.l-shape.l].forEach(v=>ys.add(roundQuarter(v)));
+    }
+    return {xs:[...xs].filter(x=>x>=-EPS&&x+shape.w<=t.width+EPS).sort((a,b)=>a-b),ys:[...ys].filter(y=>y>=-EPS&&y+shape.l<=t.length+EPS).sort((a,b)=>a-b)};
+  }
+  static candidateAxes(shape,placed,t) { return Geometry.axes(shape,placed,t); }
+  static candidates(shape,placed,t) {
+    const {xs,ys}=Geometry.axes(shape,placed,t), out=[];
+    for(const y of ys)for(const x of xs){const c={...shape,x,y};if(Geometry.valid(c,placed,t))out.push(c);}
+    return out.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||a.y-b.y||a.x-b.x);
+  }
+}
+
+// ===== engine/validator.js =====
+function validateLayout(stacks,trailer){
+  const errors=[];
+  if(!trailer||!(trailer.width>0)||!(trailer.length>0))errors.push({type:'trailer',message:'Dimensiones del tráiler inválidas'});
+  const ids=new Set();
+  stacks.forEach((s,i)=>{
+    if(!s.id||ids.has(s.id))errors.push({type:'id',index:i,message:'ID repetido o ausente'}); ids.add(s.id);
+    if(!Geometry.inside(s,trailer))errors.push({type:'outside',id:s.id,name:s.name,message:`${s.name||'Pila'} está fuera del tráiler`});
+    for(let j=0;j<i;j++)if(Geometry.overlaps(s,stacks[j]))errors.push({type:'overlap',id:s.id,otherId:stacks[j].id,message:`${s.name||'Pila'} se superpone con ${stacks[j].name||'otra pila'}`});
+  });
+  return {ok:errors.length===0,errors};
+}
+function explainValidation(v){return v.ok?'Carga válida':v.errors.slice(0,3).map(e=>e.message).join(' · ');}
+
+// ===== engine/scoring.js =====
+function layoutScore(stacks,trailer,originals=[]){
+  const used=Geometry.usedLength(stacks), area=Geometry.floorArea(stacks), waste=Math.max(0,trailer.width*used-area);
+  const contacts=stacks.reduce((sum,s)=>sum+Geometry.contactScore(s,stacks.filter(o=>o.id!==s.id),trailer),0);
+  const map=new Map(originals.map(s=>[s.id,s])); let movement=0;
+  for(const s of stacks){const o=map.get(s.id);if(o)movement+=Math.abs(s.x-o.x)+Math.abs(s.y-o.y)+(s.w!==o.w||s.l!==o.l?10:0);}
+  return used*1e9+waste*1e4-contacts*100+movement;
+}
+
+// ===== engine/refine.js =====
+function refineLayout(input,trailer,passes=20){
+  let stacks=Geometry.clone(input), changed=true, pass=0;
+  while(changed&&pass++<passes){
+    changed=false;
+    const ids=stacks.filter(s=>!s.locked).sort((a,b)=>(a.y+a.l)-(b.y+b.l)||a.x-b.x).map(s=>s.id);
+    for(const id of ids){
+      const idx=stacks.findIndex(s=>s.id===id), s=stacks[idx], others=stacks.filter(o=>o.id!==id);
+      const axes=Geometry.axes(s,others,trailer), candidates=[s];
+      for(const x of axes.xs){const c={...s,x};if(Geometry.valid(c,others,trailer))candidates.push(c);}
+      for(const y of axes.ys){const c={...s,y};if(Geometry.valid(c,others,trailer))candidates.push(c);}
+      for(const c of Geometry.candidates(s,others,trailer))candidates.push(c);
+      let best=s,bestScore=layoutScore([...others,s],trailer,input);
+      for(const c of candidates){const score=layoutScore([...others,c],trailer,input);if(score<bestScore-EPS){best=c;bestScore=score;}}
+      if(best.x!==s.x||best.y!==s.y){stacks[idx]=best;changed=true;}
+    }
+  }
+  return stacks;
+}
+
+// ===== engine/optimizer.js =====
+
+const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, '') === '4way';
+const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
+
+class LoadEngine {
+  constructor(trailer){ this.trailer=Geometry.clone(trailer); }
+
+  orientations(s){
+    const normal={...s};
+    const out=[normal];
+    if(isFourWay(s) && s.canRotate!==false && Math.abs(s.w-s.l)>EPS){
+      out.push({...s,w:s.l,l:s.w,rotated:!s.rotated});
+    }
+    return out;
+  }
+
+  metrics(stacks,originals){
+    return {
+      score:layoutScore(stacks,this.trailer,originals),
+      used:Geometry.usedLength(stacks),
+      efficiency:Geometry.floorArea(stacks)/Math.max(1,this.trailer.width*Geometry.usedLength(stacks))*100,
+      moved:stacks.filter(s=>{const o=originals.find(x=>x.id===s.id);return o&&!samePose(o,s);}).length,
+      rotated:stacks.filter(s=>{const o=originals.find(x=>x.id===s.id);return o&&(Math.abs(o.w-s.w)>EPS||Math.abs(o.l-s.l)>EPS);}).length
+    };
+  }
+
+  compact(input){
+    const locked=input.filter(s=>s.locked);
+    const lockedCheck=validateLayout(locked,this.trailer);
+    if(!lockedCheck.ok)return {ok:false,message:`Pilas bloqueadas inválidas: ${explainValidation(lockedCheck)}`};
+    const refined=this.sequenceRefine(input,input,8);
+    const check=validateLayout(refined,this.trailer);
+    return check.ok?{ok:true,stacks:refined}:{ok:false,message:`Compactación rechazada: ${explainValidation(check)}`};
+  }
+
+  orders(movable){
+    const variants=[
+      [...movable].sort((a,b)=>b.w*b.l-a.w*a.l),
+      [...movable].sort((a,b)=>Math.max(b.w,b.l)-Math.max(a.w,a.l)||b.w*b.l-a.w*a.l),
+      [...movable].sort((a,b)=>b.l-a.l||b.w-a.w),
+      [...movable].sort((a,b)=>b.w-a.w||b.l-a.l),
+      [...movable].sort((a,b)=>a.y-b.y||a.x-b.x),
+      [...movable].sort((a,b)=>(isFourWay(b)?1:0)-(isFourWay(a)?1:0)||b.w*b.l-a.w*a.l)
+    ];
+    let seed=2166136261;
+    for(const s of movable)for(const ch of String(s.id))seed=(seed^ch.charCodeAt(0))*16777619>>>0;
+    const rnd=()=>((seed=1664525*seed+1013904223>>>0)/4294967296);
+    for(let k=0;k<18;k++){
+      const a=[...movable];
+      for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+      variants.push(a);
+    }
+    return variants;
+  }
+
+  placementOptions(original,placed,limit=48){
+    const all=[];
+    for(const shape of this.orientations(original)){
+      const candidates=Geometry.candidates({...shape,x:0,y:0},placed,this.trailer);
+      for(const c of candidates)all.push(c);
+    }
+    all.sort((a,b)=>{
+      const au=Math.max(Geometry.usedLength(placed),a.y+a.l), bu=Math.max(Geometry.usedLength(placed),b.y+b.l);
+      if(au!==bu)return au-bu;
+      const ac=Geometry.contactScore(a,placed,this.trailer),bc=Geometry.contactScore(b,placed,this.trailer);
+      return bc-ac||a.y-b.y||a.x-b.x;
+    });
+    const unique=[],seen=new Set();
+    for(const c of all){
+      const key=`${c.x},${c.y},${c.w},${c.l}`;
+      if(seen.has(key))continue;
+      seen.add(key);unique.push(c);
+      if(unique.length>=limit)break;
+    }
+    return unique;
+  }
+
+  pack(order,locked,originals,beamWidth=120){
+    let beams=[Geometry.clone(locked)];
+    for(const original of order){
+      const next=[];
+      for(const placed of beams){
+        for(const c of this.placementOptions(original,placed,36))next.push([...placed,c]);
+      }
+      if(!next.length)return null;
+      next.sort((a,b)=>layoutScore(a,this.trailer,originals)-layoutScore(b,this.trailer,originals));
+      const unique=[],seen=new Set(),orientationQuota=new Map();
+      for(const layout of next){
+        const last=layout[layout.length-1];
+        const orientationKey=`${last.w}x${last.l}`;
+        const count=orientationQuota.get(orientationKey)||0;
+        if(count>=Math.max(12,Math.floor(beamWidth/2)))continue;
+        const key=layout.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join('|');
+        if(seen.has(key))continue;
+        seen.add(key);orientationQuota.set(orientationKey,count+1);unique.push(layout);
+        if(unique.length>=beamWidth)break;
+      }
+      beams=unique;
+    }
+    if(!beams.length)return null;
+    for(const beam of beams.slice(0,12)){
+      const polished=this.sequenceRefine(beam,originals,5);
+      if(validateLayout(polished,this.trailer).ok)return polished;
+    }
+    return null;
+  }
+
+  bestSingleMove(layout,id,originals,optionLimit=70){
+    const current=layout.find(s=>s.id===id);
+    if(!current||current.locked)return null;
+    const others=layout.filter(s=>s.id!==id);
+    const candidates=[current,...this.placementOptions(current,others,optionLimit)];
+    let best=current,bestScore=layoutScore(layout,this.trailer,originals);
+    for(const c of candidates){
+      const candidate=[...others,c];
+      if(!validateLayout(candidate,this.trailer).ok)continue;
+      const score=layoutScore(candidate,this.trailer,originals);
+      if(score<bestScore-EPS){best=c;bestScore=score;}
+    }
+    return samePose(best,current)?null:{piece:best,score:bestScore};
+  }
+
+  sequenceRefine(input,originals,passes=8){
+    let layout=Geometry.clone(input);
+    if(!validateLayout(layout,this.trailer).ok)return layout;
+    for(let pass=0;pass<passes;pass++){
+      let changed=false;
+      const ids=layout.filter(s=>!s.locked).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).map(s=>s.id);
+      for(const id of ids){
+        const move=this.bestSingleMove(layout,id,originals,80);
+        if(move){layout=layout.map(s=>s.id===id?move.piece:s);changed=true;}
+      }
+      if(changed)continue;
+
+      // Búsqueda de dos acciones: girar/mover una pila aunque la primera acción
+      // no sea mejor por sí sola, para permitir que una segunda pila ocupe el hueco abierto.
+      const baseScore=layoutScore(layout,this.trailer,originals);
+      let bestLayout=null,bestScore=baseScore;
+      const focus=layout.filter(s=>!s.locked).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).slice(0,14);
+      for(const first of focus){
+        const withoutFirst=layout.filter(s=>s.id!==first.id);
+        const firstOptions=this.placementOptions(first,withoutFirst,22);
+        for(const p1 of firstOptions){
+          const stage1=[...withoutFirst,p1];
+          if(!validateLayout(stage1,this.trailer).ok)continue;
+          const secondIds=stage1.filter(s=>!s.locked&&s.id!==first.id).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).slice(0,10).map(s=>s.id);
+          for(const secondId of secondIds){
+            const second=this.bestSingleMove(stage1,secondId,originals,30);
+            if(!second)continue;
+            const stage2=stage1.map(s=>s.id===secondId?second.piece:s);
+            const score=layoutScore(stage2,this.trailer,originals);
+            if(score<bestScore-EPS){bestScore=score;bestLayout=stage2;}
+          }
+        }
+      }
+      if(bestLayout){layout=bestLayout;changed=true;}
+      if(!changed)break;
+    }
+    const final=refineLayout(layout,this.trailer,8);
+    return validateLayout(final,this.trailer).ok?final:layout;
+  }
+
+  optimize(input){
+    const locked=input.filter(s=>s.locked), movable=input.filter(s=>!s.locked);
+    const lockedCheck=validateLayout(locked,this.trailer);
+    if(!lockedCheck.ok)return {ok:false,message:`No se puede optimizar: ${explainValidation(lockedCheck)}`};
+    for(const s of input){
+      const fitsNormal=s.w<=this.trailer.width+EPS;
+      const fitsRotated=isFourWay(s)&&s.canRotate!==false&&s.l<=this.trailer.width+EPS;
+      if(!fitsNormal&&!fitsRotated)return {ok:false,message:`${s.name||'Una pila'} es más ancha que el tráiler y no tiene una rotación válida.`};
+    }
+
+    const solutions=[];
+    if(validateLayout(input,this.trailer).ok){
+      const local=this.sequenceRefine(input,input,10);
+      if(validateLayout(local,this.trailer).ok)solutions.push({name:'Ajuste con rotaciones',stacks:local});
+    }
+
+    for(const order of this.orders(movable)){
+      const packed=this.pack(order,locked,input,120);
+      if(packed)solutions.push({name:'Optimización global',stacks:packed});
+    }
+
+    const valid=[],seen=new Set();
+    for(const s of solutions){
+      const check=validateLayout(s.stacks,this.trailer);
+      if(!check.ok)continue;
+      const key=s.stacks.map(x=>`${x.id}:${x.x},${x.y},${x.w},${x.l}`).sort().join('|');
+      if(seen.has(key))continue;
+      seen.add(key);Object.assign(s,this.metrics(s.stacks,input));valid.push(s);
+    }
+    valid.sort((a,b)=>a.score-b.score);
+    return valid.length?{ok:true,solutions:valid.slice(0,3)}:{ok:false,message:'No se encontró un acomodo válido. La IA probó movimientos y rotaciones permitidas, pero ninguna secuencia completa pasó la validación.'};
+  }
+}
+
+// ===== app.js =====
+
 
 const SCALE = 1.05;
 const PRESETS = {
