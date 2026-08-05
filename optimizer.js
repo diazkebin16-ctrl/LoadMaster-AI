@@ -7,11 +7,10 @@ const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, 
 const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
 
 export class LoadEngine {
-  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[],seedOffset=0}={}){
+  constructor(trailer,{timeLimitMs=9000,patterns=[],strategies=[]}={}){
     this.trailer=Geometry.clone(trailer);
     this.patterns=Array.isArray(patterns)?Geometry.clone(patterns):[];
     this.strategies=Array.isArray(strategies)?Geometry.clone(strategies):[];
-    this.seedOffset=Number(seedOffset)||0;
     this.deadline=Date.now()+timeLimitMs;
     this.timedOut=false;
   }
@@ -54,7 +53,7 @@ export class LoadEngine {
       [...movable].sort((a,b)=>a.y-b.y||a.x-b.x),
       [...movable].sort((a,b)=>(isFourWay(b)?1:0)-(isFourWay(a)?1:0)||b.w*b.l-a.w*a.l)
     ];
-    let seed=(2166136261 ^ ((this.seedOffset+1)*2654435761))>>>0;
+    let seed=2166136261;
     for(const s of movable)for(const ch of String(s.id))seed=(seed^ch.charCodeAt(0))*16777619>>>0;
     const rnd=()=>((seed=1664525*seed+1013904223>>>0)/4294967296);
     const randomOrders=movable.length>28?2:movable.length>18?4:8;
@@ -261,6 +260,64 @@ export class LoadEngine {
     return candidates;
   }
 
+
+  lastMileRescue(placed,unplaced,originals){
+    // Fase final dirigida: solo se activa cuando faltan de 1 a 3 pilas.
+    // Parte de la mejor solución ya encontrada y nunca la reemplaza si no mejora.
+    const missing=(unplaced||[]).map(Geometry.clone);
+    if(!missing.length||missing.length>3)return [];
+    const movable=placed.filter(s=>!s.locked);
+    if(!movable.length)return [];
+    const candidates=[];
+    const used=Geometry.usedLength(placed);
+    const maxMissingLength=Math.max(...missing.map(s=>Math.max(s.l,s.w)),1);
+    const rankedEnd=[...movable].sort((a,b)=>(b.y+b.l)-(a.y+a.l));
+    const rankedSmall=[...movable].sort((a,b)=>a.w*a.l-b.w*b.l||(b.y+b.l)-(a.y+a.l));
+    const zoneDepths=[maxMissingLength*1.5,maxMissingLength*2.5,maxMissingLength*4];
+    const removalSets=[];
+    for(const n of [4,6,8,10,12,16,Math.min(22,movable.length)]){
+      if(n>0)removalSets.push(rankedEnd.slice(0,n));
+    }
+    for(const depth of zoneDepths){
+      const zone=movable.filter(s=>s.y+s.l>=used-depth);
+      if(zone.length)removalSets.push(zone);
+    }
+    removalSets.push(rankedSmall.slice(0,Math.min(12,movable.length)));
+
+    const seenSets=new Set();
+    for(const removedList of removalSets){
+      if(!this.hasTime())break;
+      const ids=[...new Set(removedList.map(s=>s.id))];
+      const setKey=ids.slice().sort().join('|');
+      if(!ids.length||seenSets.has(setKey))continue;
+      seenSets.add(setKey);
+      const removed=new Set(ids);
+      const base=placed.filter(s=>s.locked||!removed.has(s.id));
+      if(!validateLayout(base,this.trailer).ok)continue;
+      const pending=[...missing,...placed.filter(s=>removed.has(s.id))];
+      const priorityOrders=[
+        [...missing,...pending.filter(s=>!missing.some(m=>m.id===s.id))],
+        [...missing].sort((a,b)=>b.w*b.l-a.w*a.l).concat(pending.filter(s=>!missing.some(m=>m.id===s.id)).sort((a,b)=>b.w*b.l-a.w*a.l)),
+        ...this.rowCombinationOrders(pending),
+        ...this.orders(pending).slice(0,8)
+      ];
+      const seenOrders=new Set();
+      for(const order of priorityOrders){
+        if(!this.hasTime())break;
+        const key=order.map(s=>s.id).join('|');
+        if(seenOrders.has(key))continue;
+        seenOrders.add(key);
+        const result=this.packPartial(order,base,originals,pending.length>18?260:360);
+        if(!result||!validateLayout(result.stacks,this.trailer).ok)continue;
+        const placedIds=new Set(result.stacks.map(s=>s.id));
+        const stillMissing=originals.filter(s=>!placedIds.has(s.id));
+        candidates.push({name:`Rescate final dirigido (${ids.length} reacomodadas)`,stacks:result.stacks,unplaced:stillMissing});
+        if(!stillMissing.length)return candidates;
+      }
+    }
+    return candidates;
+  }
+
   patternSeeds(input){
     const seeds=[];
     for(const pattern of this.patterns){
@@ -359,6 +416,22 @@ export class LoadEngine {
       const partial=this.packPartial(order,locked,input,Math.max(90,beamWidth));
       if(partial&&partial.stacks.length>=locked.length){
         solutions.push({name:partial.unplaced.length?'Máxima carga parcial':'Optimización global',...partial});
+      }
+    }
+
+    // Antes de reconstrucciones generales, intenta rescatar específicamente las últimas 1–3 pilas
+    // desde la mejor carga parcial disponible. La solución anterior permanece entre los candidatos.
+    if(this.hasTime()){
+      const partialSeeds=solutions.map(s=>{
+        const ids=new Set((s.stacks||[]).map(x=>x.id));
+        const missing=input.filter(x=>!ids.has(x.id));
+        const pallets=(s.stacks||[]).reduce((sum,x)=>sum+(Number(x.qty)||1),0);
+        return {s,missing,pallets};
+      }).filter(x=>x.missing.length>0&&x.missing.length<=3)
+        .sort((a,b)=>b.pallets-a.pallets||b.s.stacks.length-a.s.stacks.length);
+      if(partialSeeds.length){
+        const best=partialSeeds[0];
+        for(const rescued of this.lastMileRescue(best.s.stacks,best.missing,input))solutions.push(rescued);
       }
     }
 
