@@ -1,13 +1,13 @@
-# LoadMaster AI v0.5 — Navegación mejorada
+# LoadMaster AI v0.6 — Scroll vertical y barra inferior
 
 Correcciones:
-- El menú flotante aparece separado de la pila, a un costado.
-- Ya no tapa la pila seleccionada.
-- El área alrededor del tráiler se puede desplazar con el dedo.
-- El tráiler y su contorno permiten scroll horizontal y vertical.
-- Solo una pila captura el gesto cuando se toca directamente.
-- Al tocar un área vacía se quita la selección.
-- Mantiene el editor libre, giro, compactar y demás correcciones anteriores.
+- Deslizar el dedo sobre el área gris o dentro del tráiler mueve la página.
+- Se eliminó el scroll vertical interno que bloqueaba la navegación.
+- Solo se arrastra una pila cuando se toca directamente.
+- Los controles ya no aparecen junto a la pila.
+- Girar, Bloquear y Eliminar están en una barra fija inferior.
+- La barra muestra el nombre de la pila seleccionada.
+- Mantiene todas las correcciones anteriores.
 
 ## Actualización
 Sube todos los archivos de esta carpeta a la raíz del repositorio LoadMaster-AI,

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 0.5</title>
+  <title>LoadMaster AI 0.6</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,7 +12,7 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>La IA que aprende a cargar como tú. · v0.5</p>
+    <p>La IA que aprende a cargar como tú. · v0.6</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
@@ -153,16 +153,22 @@
         <div class="noseTag">NARIZ</div>
         <div class="doorTag">PUERTAS</div>
         <div id="freeZone" class="freeZone"></div>
-        <div id="floatingTools" class="floatingTools" hidden>
-          <button id="floatRotateBtn" class="floatPrimary" type="button">↻ Girar</button>
-          <button id="floatLockBtn" type="button">🔒</button>
-          <button id="floatDeleteBtn" type="button">🗑</button>
-        </div>
+
       </div>
     </div>
     <p class="tip">Consejo: bloquea las pilas que no quieras que la optimización mueva.</p>
   </section>
 </main>
+
+
+<div id="floatingTools" class="bottomTools" hidden>
+  <div id="bottomSelectedName" class="bottomSelectedName">Pila seleccionada</div>
+  <div class="bottomToolButtons">
+    <button id="floatRotateBtn" class="floatPrimary" type="button">↻ Girar</button>
+    <button id="floatLockBtn" type="button">🔒 Bloquear</button>
+    <button id="floatDeleteBtn" type="button">🗑 Eliminar</button>
+  </div>
+</div>
 
 <div id="toast" class="toast" aria-live="polite"></div>
 
