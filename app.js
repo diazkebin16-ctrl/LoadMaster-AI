@@ -61,7 +61,19 @@ function explainValidation(v){return v.ok?'Carga válida':v.errors.slice(0,3).ma
 // ===== engine/scoring.js =====
 function layoutScore(stacks,trailer,originals=[]){
   const used=Geometry.usedLength(stacks), area=Geometry.floorArea(stacks), waste=Math.max(0,trailer.width*used-area);
-  const contacts=stacks.reduce((sum,s)=>sum+Geometry.contactScore(s,stacks.filter(o=>o.id!==s.id),trailer),0);
+  let contacts=0;
+  for(let i=0;i<stacks.length;i++){
+    const s=stacks[i];
+    if(Math.abs(s.x)<EPS||Math.abs(s.x+s.w-trailer.width)<EPS)contacts+=s.l;
+    if(Math.abs(s.y)<EPS)contacts+=s.w;
+    for(let j=i+1;j<stacks.length;j++){
+      const o=stacks[j];
+      const vertical=Math.max(0,Math.min(s.y+s.l,o.y+o.l)-Math.max(s.y,o.y));
+      const horizontal=Math.max(0,Math.min(s.x+s.w,o.x+o.w)-Math.max(s.x,o.x));
+      if(Math.abs(s.x+s.w-o.x)<EPS||Math.abs(o.x+o.w-s.x)<EPS)contacts+=vertical*2;
+      if(Math.abs(s.y+s.l-o.y)<EPS||Math.abs(o.y+o.l-s.y)<EPS)contacts+=horizontal*2;
+    }
+  }
   const map=new Map(originals.map(s=>[s.id,s])); let movement=0;
   for(const s of stacks){const o=map.get(s.id);if(o)movement+=Math.abs(s.x-o.x)+Math.abs(s.y-o.y)+(s.w!==o.w||s.l!==o.l?10:0);}
   return used*1e9+waste*1e4-contacts*100+movement;
@@ -93,7 +105,12 @@ const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, 
 const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
 
 class LoadEngine {
-  constructor(trailer){ this.trailer=Geometry.clone(trailer); }
+  constructor(trailer,{timeLimitMs=9000}={}){
+    this.trailer=Geometry.clone(trailer);
+    this.deadline=Date.now()+timeLimitMs;
+    this.timedOut=false;
+  }
+  hasTime(){if(Date.now()<this.deadline)return true;this.timedOut=true;return false;}
 
   orientations(s){
     const normal={...s};
@@ -135,7 +152,8 @@ class LoadEngine {
     let seed=2166136261;
     for(const s of movable)for(const ch of String(s.id))seed=(seed^ch.charCodeAt(0))*16777619>>>0;
     const rnd=()=>((seed=1664525*seed+1013904223>>>0)/4294967296);
-    for(let k=0;k<18;k++){
+    const randomOrders=movable.length>28?2:movable.length>18?4:8;
+    for(let k=0;k<randomOrders;k++){
       const a=[...movable];
       for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
       variants.push(a);
@@ -168,9 +186,11 @@ class LoadEngine {
   pack(order,locked,originals,beamWidth=120){
     let beams=[Geometry.clone(locked)];
     for(const original of order){
+      if(!this.hasTime())return null;
       const next=[];
       for(const placed of beams){
-        for(const c of this.placementOptions(original,placed,36))next.push([...placed,c]);
+        if(!this.hasTime())break;
+        for(const c of this.placementOptions(original,placed,24))next.push([...placed,c]);
       }
       if(!next.length)return null;
       next.sort((a,b)=>layoutScore(a,this.trailer,originals)-layoutScore(b,this.trailer,originals));
@@ -188,8 +208,9 @@ class LoadEngine {
       beams=unique;
     }
     if(!beams.length)return null;
-    for(const beam of beams.slice(0,12)){
-      const polished=this.sequenceRefine(beam,originals,5);
+    for(const beam of beams.slice(0,6)){
+      if(!this.hasTime())break;
+      const polished=this.sequenceRefine(beam,originals,3);
       if(validateLayout(polished,this.trailer).ok)return polished;
     }
     return null;
@@ -214,10 +235,12 @@ class LoadEngine {
     let layout=Geometry.clone(input);
     if(!validateLayout(layout,this.trailer).ok)return layout;
     for(let pass=0;pass<passes;pass++){
+      if(!this.hasTime())break;
       let changed=false;
       const ids=layout.filter(s=>!s.locked).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).map(s=>s.id);
       for(const id of ids){
-        const move=this.bestSingleMove(layout,id,originals,80);
+        if(!this.hasTime())break;
+        const move=this.bestSingleMove(layout,id,originals,40);
         if(move){layout=layout.map(s=>s.id===id?move.piece:s);changed=true;}
       }
       if(changed)continue;
@@ -226,16 +249,18 @@ class LoadEngine {
       // no sea mejor por sí sola, para permitir que una segunda pila ocupe el hueco abierto.
       const baseScore=layoutScore(layout,this.trailer,originals);
       let bestLayout=null,bestScore=baseScore;
-      const focus=layout.filter(s=>!s.locked).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).slice(0,14);
+      const focus=layout.filter(s=>!s.locked).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).slice(0,8);
       for(const first of focus){
+        if(!this.hasTime())break;
         const withoutFirst=layout.filter(s=>s.id!==first.id);
-        const firstOptions=this.placementOptions(first,withoutFirst,22);
+        const firstOptions=this.placementOptions(first,withoutFirst,12);
         for(const p1 of firstOptions){
           const stage1=[...withoutFirst,p1];
           if(!validateLayout(stage1,this.trailer).ok)continue;
-          const secondIds=stage1.filter(s=>!s.locked&&s.id!==first.id).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).slice(0,10).map(s=>s.id);
+          const secondIds=stage1.filter(s=>!s.locked&&s.id!==first.id).sort((a,b)=>(b.y+b.l)-(a.y+a.l)).slice(0,6).map(s=>s.id);
           for(const secondId of secondIds){
-            const second=this.bestSingleMove(stage1,secondId,originals,30);
+            if(!this.hasTime())break;
+            const second=this.bestSingleMove(stage1,secondId,originals,16);
             if(!second)continue;
             const stage2=stage1.map(s=>s.id===secondId?second.piece:s);
             const score=layoutScore(stage2,this.trailer,originals);
@@ -266,15 +291,18 @@ class LoadEngine {
     // Beam search progresivo: permite que una colocación intermedia no sea
     // la mejor visualmente, siempre que abra espacio para las siguientes.
     let beams=[fixed];
-    const pendingOrders=this.orders(pending).slice(0,10);
+    const pendingOrders=this.orders(pending).slice(0,pending.length>18?3:5);
     const complete=[];
     for(const order of pendingOrders){
+      if(!this.hasTime())break;
       beams=[Geometry.clone(fixed)];
       let failed=false;
       for(const piece of order){
+        if(!this.hasTime()){failed=true;break;}
         const next=[];
         for(const placed of beams){
-          const opts=this.placementOptions(piece,placed,96);
+          if(!this.hasTime())break;
+          const opts=this.placementOptions(piece,placed,36);
           for(const c of opts) next.push([...placed,c]);
         }
         if(!next.length){failed=true;break;}
@@ -284,13 +312,14 @@ class LoadEngine {
           const key=layout.map(x=>`${x.id}:${x.x},${x.y},${x.w},${x.l}`).sort().join('|');
           if(seen.has(key))continue;
           seen.add(key);unique.push(layout);
-          if(unique.length>=220)break;
+          if(unique.length>=80)break;
         }
         beams=unique;
       }
       if(!failed){
-        for(const candidate of beams.slice(0,20)){
-          const polished=this.sequenceRefine(candidate,input,10);
+        for(const candidate of beams.slice(0,6)){
+          if(!this.hasTime())break;
+          const polished=this.sequenceRefine(candidate,input,4);
           if(validateLayout(polished,this.trailer).ok) complete.push(polished);
         }
       }
@@ -320,12 +349,14 @@ class LoadEngine {
     }
 
     if(validateLayout(input,this.trailer).ok){
-      const local=this.sequenceRefine(input,input,10);
+      const local=this.sequenceRefine(input,input,5);
       if(validateLayout(local,this.trailer).ok)solutions.push({name:'Ajuste con rotaciones',stacks:local});
     }
 
+    const beamWidth=movable.length>28?36:movable.length>18?56:80;
     for(const order of this.orders(movable)){
-      const packed=this.pack(order,locked,input,120);
+      if(!this.hasTime())break;
+      const packed=this.pack(order,locked,input,beamWidth);
       if(packed)solutions.push({name:'Optimización global',stacks:packed});
     }
 
@@ -338,7 +369,7 @@ class LoadEngine {
       seen.add(key);Object.assign(s,this.metrics(s.stacks,input));valid.push(s);
     }
     valid.sort((a,b)=>a.score-b.score);
-    return valid.length?{ok:true,solutions:valid.slice(0,3)}:{ok:false,message:'No se encontró un acomodo válido. La IA probó movimientos y rotaciones permitidas, pero ninguna secuencia completa pasó la validación.'};
+    return valid.length?{ok:true,solutions:valid.slice(0,3),timedOut:this.timedOut}:{ok:false,timedOut:this.timedOut,message:this.timedOut?'Se alcanzó el límite de tiempo sin encontrar un acomodo válido. Bloquea las pilas correctas o compacta primero.':'No se encontró un acomodo válido. La IA probó movimientos y rotaciones permitidas, pero ninguna secuencia completa pasó la validación.'};
   }
 }
 
@@ -434,7 +465,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       if(!this.state.stacks.length)return this.toast("No hay pilas");
       $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Analizando geometría, rotaciones y espacios libres…";$("optimizerResults").innerHTML="";
       setTimeout(()=>{
-        const before=clone(this.state.stacks);const beforeUsed=Geometry.usedLength(before);const engine=new LoadEngine(this.state.trailer);const report=engine.optimize(before);
+        const before=clone(this.state.stacks);const beforeUsed=Geometry.usedLength(before);const engine=new LoadEngine(this.state.trailer,{timeLimitMs:9000});const report=engine.optimize(before);
         if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return;}
         const solutions=report.solutions;this.lastSolutions=solutions;
         if(!solutions.length){$("optimizerSummary").textContent="No se encontró una solución válida.";return;}
@@ -444,7 +475,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
         this.store.remember();this.state.stacks=clone(best.stacks);this.render();
         const saved=Math.max(0,beforeUsed-best.used);
         const moveDetails=best.stacks.map(s=>{const o=before.find(x=>x.id===s.id);if(!o)return null;const dx=s.x-o.x,dy=s.y-o.y;return (Math.abs(dx)>EPS||Math.abs(dy)>EPS)?`${s.name}: x ${o.x.toFixed(1)}→${s.x.toFixed(1)}, y ${o.y.toFixed(1)}→${s.y.toFixed(1)}`:null;}).filter(Boolean);
-        $("optimizerSummary").textContent=`Aplicada la mejor solución: ${best.moved} pilas movidas · ${saved.toFixed(1)}\" menos de largo.${moveDetails.length?" "+moveDetails.slice(0,3).join(" · "):""}`;
+        $("optimizerSummary").textContent=`Aplicada la mejor solución: ${best.moved} pilas movidas · ${saved.toFixed(1)}\" menos de largo.${report.timedOut?" Resultado seguro dentro del límite de 9 s.":""}${moveDetails.length?" "+moveDetails.slice(0,3).join(" · "):""}`;
         this.renderSolutions(solutions,beforeUsed);
         this.toast(best.moved?`IA movió ${best.moved} pila${best.moved===1?"":"s"}`:"La carga ya estaba en la mejor posición encontrada");
       },30);
@@ -463,7 +494,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"4.4",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga.json";a.click();URL.revokeObjectURL(a.href);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"4.5",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v4.5.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.library=d.library||this.state.library;this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
     renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
     render(){
