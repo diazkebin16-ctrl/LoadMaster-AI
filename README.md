@@ -1,15 +1,15 @@
-# LoadMaster AI v4.5 optimizada — 2026-08-05
+# LoadMaster AI v5.0 — Aprendizaje visual confirmado
 
-Mantiene las reglas operativas de v4.4: límites del tráiler, ausencia de colisiones,
-pilas bloqueadas inmóviles y rotación exclusiva de pallets 4-way autorizados.
+Versión de prueba con motor heurístico de 9 segundos y memoria local de patrones.
 
-Mejoras principales:
+## Aprendizaje visual
 
-- límite máximo de búsqueda de 9 segundos;
-- haces y órdenes adaptativos según el tamaño de la carga;
-- puntuación geométrica sin arreglos temporales innecesarios;
-- búsqueda progresiva y refinamiento con límites seguros;
-- caché PWA y metadatos actualizados a v4.5.
+1. Importe una captura PNG, JPG o WebP como referencia.
+2. Reproduzca o corrija el acomodo en el tráiler.
+3. Use **Detectar filas** para revisar firmas como `48+48` o `34+34+28`.
+4. Use **Guardar patrón** solamente cuando el acomodo sea correcto.
+5. En cargas futuras, pulse **Usar** o ejecute **Optimización IA**; el motor probará primero patrones compatibles.
 
-La optimización es heurística: encuentra la mejor solución válida dentro del tiempo
-disponible, pero no garantiza el óptimo matemático absoluto para cargas muy grandes.
+La captura no se sube ni se guarda completa. El navegador conserva localmente únicamente el patrón geométrico confirmado, su nombre y metadatos básicos del archivo. Esto evita aprender errores mediante reconocimiento visual incierto.
+
+Reglas conservadas: tráiler 96×628 por defecto, rotación exclusiva de 4-way autorizados, pilas bloqueadas inmóviles, validación de límites y colisiones, y búsqueda máxima de 9 segundos.

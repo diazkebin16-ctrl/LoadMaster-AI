@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 4.5 — optimizada</title>
+  <title>LoadMaster AI 5.0 — Aprendizaje visual</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,14 +12,14 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>Engine v2 · reparación progresiva rápida · v4.5</p>
+    <p>Engine v3 · patrones aprendidos · v5.0</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
 
 <main class="app">
   <aside class="sidebar">
-    <section class="card versionCard"><strong>v4.5</strong> · Repara pilas fuera o en conflicto sin desarmar lo que ya está bien, con límite de búsqueda de 9 segundos.</section>
+    <section class="card versionCard"><strong>v5.0</strong> · Optimización de 9 segundos con memoria de patrones confirmados desde capturas y acomodos reales.</section>
     <section class="card">
       <h2>Tráiler</h2>
       <label>Modelo guardado
@@ -92,6 +92,26 @@
         <button id="saveLibrary">Guardar medida</button>
         <button id="addPallet" class="primary">Crear pilas</button>
       </div>
+    </section>
+
+
+    <section class="card visualLearningCard">
+      <h2>Aprendizaje visual</h2>
+      <p class="cardHelp">Importa una captura, reproduce o corrige el acomodo en el tráiler y guárdalo como patrón confirmado.</p>
+      <label>Captura de referencia
+        <input id="referenceImageInput" type="file" accept="image/png,image/jpeg,image/webp">
+      </label>
+      <div id="referencePreview" class="referencePreview"><span>Sin captura seleccionada</span></div>
+      <label>Nombre del patrón
+        <input id="patternName" type="text" placeholder="Ej. 34+34+28 — carga real">
+      </label>
+      <div class="grid2">
+        <button id="learnPatternBtn" class="primary" type="button">Guardar patrón</button>
+        <button id="analyzePatternBtn" type="button">Detectar filas</button>
+      </div>
+      <div class="patternStats"><span>Patrones guardados</span><strong id="patternCount">0</strong></div>
+      <div id="patternList" class="patternList"></div>
+      <p class="privacyNote">La imagen no se sube a internet. Solo se guarda el patrón geométrico confirmado.</p>
     </section>
 
     <section class="card">
@@ -182,6 +202,6 @@
 
 <div id="toast" class="toast" aria-live="polite"></div>
 
-<script defer src="app.js?v=4.5"></script>
+<script defer src="app.js?v=5.0"></script>
 </body>
 </html>
