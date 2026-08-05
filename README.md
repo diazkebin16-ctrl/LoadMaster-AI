@@ -1,4 +1,4 @@
-# LoadMaster AI v5.0 — Aprendizaje visual confirmado
+# LoadMaster AI v5.1.1 — Aprendizaje visual confirmado
 
 Versión de prueba con motor heurístico de 9 segundos y memoria local de patrones.
 

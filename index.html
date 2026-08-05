@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 5.0 — Aprendizaje visual</title>
+  <title>LoadMaster AI 5.1 — Optimización real</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,14 +12,14 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>Engine v3 · patrones aprendidos · v5.0</p>
+    <p>Engine v4 · carga parcial real · v5.1</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
 
 <main class="app">
   <aside class="sidebar">
-    <section class="card versionCard"><strong>v5.0</strong> · Optimización de 9 segundos con memoria de patrones confirmados desde capturas y acomodos reales.</section>
+    <section class="card versionCard"><strong>v5.1 REAL</strong> · Motor con carga parcial, múltiples estrategias y resultado visible de pallets fuera.</section>
     <section class="card">
       <h2>Tráiler</h2>
       <label>Modelo guardado
@@ -35,11 +35,11 @@
         </select>
       </label>
       <div class="grid2">
-        <label>Ancho (pulg.)
-          <input id="trailerWidth" type="number" min="1" value="96">
-        </label>
-        <label>Largo (pulg.)
+        <label>Largo (pulg.) — IZQUIERDA
           <input id="trailerLength" type="number" min="1" value="628">
+        </label>
+        <label>Ancho (pulg.) — DERECHA
+          <input id="trailerWidth" type="number" min="1" value="96">
         </label>
       </div>
       <button id="applyTrailer">Aplicar</button>
@@ -53,11 +53,11 @@
         </select>
       </label>
       <div class="grid2">
-        <label>Ancho
-          <input id="palletWidth" type="number" min="1" value="48">
-        </label>
-        <label>Largo
+        <label>Largo — IZQUIERDA
           <input id="palletLength" type="number" min="1" value="40">
+        </label>
+        <label>Ancho — DERECHA
+          <input id="palletWidth" type="number" min="1" value="48">
         </label>
         <label>Cantidad total
           <input id="palletQty" type="number" min="1" value="1">
@@ -179,7 +179,7 @@
 
       </div>
     </div>
-    <p class="tip"><strong>Engine v2:</strong> optimiza sobre una copia virtual, valida límites y colisiones antes de aplicar, y rechaza cualquier solución insegura.</p>
+    <p class="tip"><strong>Engine v4 REAL:</strong> optimiza sobre una copia virtual, valida límites y colisiones antes de aplicar, y rechaza cualquier solución insegura.</p>
     <section id="optimizerPanel" class="optimizerPanel" hidden>
       <div class="optimizerHeader">
         <div><strong>Resultados de optimización</strong><p id="optimizerSummary">Buscando soluciones…</p></div>
@@ -202,6 +202,6 @@
 
 <div id="toast" class="toast" aria-live="polite"></div>
 
-<script defer src="app.js?v=5.0"></script>
+<script defer src="app.js?v=5.1-real"></script>
 </body>
 </html>

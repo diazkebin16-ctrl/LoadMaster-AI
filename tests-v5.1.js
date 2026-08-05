@@ -1,0 +1,16 @@
+const fs=require('fs'),vm=require('vm');
+let src=fs.readFileSync('app.js','utf8');
+src=src.replace(/new App\(\);\s*$/,'globalThis.__LM={LoadEngine,validateLayout,Geometry};');
+const sandbox={console,Date,Math,setTimeout:()=>{},clearTimeout:()=>{},localStorage:{getItem:()=>null,setItem:()=>{}},document:{getElementById:()=>({}),querySelector:()=>null},window:{addEventListener:()=>{}},navigator:{},crypto:{randomUUID:()=>String(Math.random())}};
+vm.createContext(sandbox);vm.runInContext(src,sandbox);
+const {LoadEngine,validateLayout}=sandbox.__LM;
+const mk=(id,w,l,qty=20,type='4-way')=>({id,name:`${w}x${l}`,w,l,x:0,y:700,qty,type,canRotate:type==='4-way',locked:false});
+const input=[mk('a',48,40),mk('b',48,40),mk('c',48,40),mk('d',48,40)];
+let r=new LoadEngine({width:96,length:70},{timeLimitMs:1000}).optimize(input);
+if(!r.ok)throw new Error('No devolvió carga parcial');
+if(r.solutions[0].loadedStacks!==2||r.solutions[0].unplacedStacks!==2)throw new Error(`Carga parcial incorrecta: ${JSON.stringify(r.solutions[0])}`);
+if(!validateLayout(r.solutions[0].stacks,{width:96,length:70}).ok)throw new Error('Layout parcial inválido');
+const combo=[mk('e',42,40),mk('f',42,40),mk('g',34,40),mk('h',34,40),mk('i',28,40)];
+r=new LoadEngine({width:96,length:100},{timeLimitMs:1500}).optimize(combo);
+if(!r.ok||r.solutions[0].loadedStacks<5)throw new Error('No encontró combinación de ancho 34+34+28 / 42+42');
+console.log('PASS v5.1: carga parcial, validación y combinaciones de ancho.');

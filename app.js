@@ -358,47 +358,102 @@ class LoadEngine {
     return seeds;
   }
 
+
+  partialRank(state, originals){
+    const loadedPallets=state.placed.reduce((sum,s)=>sum+(Number(s.qty)||1),0);
+    const loadedArea=Geometry.floorArea(state.placed);
+    return {loadedPallets,loadedStacks:state.placed.length,loadedArea,score:layoutScore(state.placed,this.trailer,originals)};
+  }
+
+  packPartial(order,locked,originals,beamWidth=140){
+    let beams=[{placed:Geometry.clone(locked),unplaced:[]}];
+    for(const original of order){
+      if(!this.hasTime())break;
+      const next=[];
+      for(const state of beams){
+        if(!this.hasTime())break;
+        const options=this.placementOptions(original,state.placed,24);
+        for(const c of options)next.push({placed:[...state.placed,c],unplaced:[...state.unplaced]});
+        // Esta rama es esencial: conserva la mejor carga parcial aunque esta pila no quepa.
+        next.push({placed:state.placed,unplaced:[...state.unplaced,Geometry.clone(original)]});
+      }
+      const ranked=next.map(state=>({state,rank:this.partialRank(state,originals)}));
+      ranked.sort((a,b)=>
+        b.rank.loadedPallets-a.rank.loadedPallets ||
+        b.rank.loadedStacks-a.rank.loadedStacks ||
+        b.rank.loadedArea-a.rank.loadedArea ||
+        a.rank.score-b.rank.score
+      );
+      const unique=[],seen=new Set();
+      for(const item of ranked){
+        const key=item.state.placed.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join('|');
+        if(seen.has(key))continue;
+        seen.add(key);unique.push(item.state);
+        if(unique.length>=beamWidth)break;
+      }
+      beams=unique;
+    }
+    if(!beams.length)return null;
+    beams.sort((a,b)=>{
+      const ar=this.partialRank(a,originals),br=this.partialRank(b,originals);
+      return br.loadedPallets-ar.loadedPallets||br.loadedStacks-ar.loadedStacks||br.loadedArea-ar.loadedArea||ar.score-br.score;
+    });
+    const best=beams[0];
+    const polished=this.sequenceRefine(best.placed,originals,3);
+    return {stacks:validateLayout(polished,this.trailer).ok?polished:best.placed,unplaced:best.unplaced};
+  }
+
   optimize(input){
     const locked=input.filter(s=>s.locked), movable=input.filter(s=>!s.locked);
     const lockedCheck=validateLayout(locked,this.trailer);
     if(!lockedCheck.ok)return {ok:false,message:`No se puede optimizar: ${explainValidation(lockedCheck)}`};
-    for(const s of input){
-      const fitsNormal=s.w<=this.trailer.width+EPS;
-      const fitsRotated=isFourWay(s)&&s.canRotate!==false&&s.l<=this.trailer.width+EPS;
-      if(!fitsNormal&&!fitsRotated)return {ok:false,message:`${s.name||'Una pila'} es más ancha que el tráiler y no tiene una rotación válida.`};
-    }
 
-    const solutions=[...this.patternSeeds(input)];
+    const solutions=[...this.patternSeeds(input)].map(s=>({...s,unplaced:[]}));
 
-    // Modo reparación: útil cuando el usuario ya hizo casi todo el acomodo
-    // y solo quedan algunas pilas rojas fuera o en conflicto.
     const repaired=this.repairLayout(input);
     if(repaired&&validateLayout(repaired,this.trailer).ok){
-      solutions.push({name:'Reparación progresiva',stacks:repaired});
+      solutions.push({name:'Reparación progresiva',stacks:repaired,unplaced:[]});
     }
 
     if(validateLayout(input,this.trailer).ok){
       const local=this.sequenceRefine(input,input,5);
-      if(validateLayout(local,this.trailer).ok)solutions.push({name:'Ajuste con rotaciones',stacks:local});
+      if(validateLayout(local,this.trailer).ok)solutions.push({name:'Ajuste con rotaciones',stacks:local,unplaced:[]});
     }
 
-    const beamWidth=movable.length>28?36:movable.length>18?56:80;
+    const beamWidth=movable.length>28?42:movable.length>18?68:96;
     for(const order of this.orders(movable)){
       if(!this.hasTime())break;
       const packed=this.pack(order,locked,input,beamWidth);
-      if(packed)solutions.push({name:'Optimización global',stacks:packed});
+      if(packed)solutions.push({name:'Optimización global completa',stacks:packed,unplaced:[]});
+      if(!this.hasTime())break;
+      const partial=this.packPartial(order,locked,input,Math.max(90,beamWidth));
+      if(partial&&partial.stacks.length>=locked.length){
+        solutions.push({name:partial.unplaced.length?'Máxima carga parcial':'Optimización global',...partial});
+      }
     }
 
     const valid=[],seen=new Set();
     for(const s of solutions){
       const check=validateLayout(s.stacks,this.trailer);
       if(!check.ok)continue;
+      const placedIds=new Set(s.stacks.map(x=>x.id));
+      s.unplaced=(s.unplaced||input.filter(x=>!placedIds.has(x.id))).filter(x=>!placedIds.has(x.id));
       const key=s.stacks.map(x=>`${x.id}:${x.x},${x.y},${x.w},${x.l}`).sort().join('|');
       if(seen.has(key))continue;
-      seen.add(key);Object.assign(s,this.metrics(s.stacks,input));valid.push(s);
+      seen.add(key);
+      Object.assign(s,this.metrics(s.stacks,input));
+      s.loadedStacks=s.stacks.length;
+      s.loadedPallets=s.stacks.reduce((sum,x)=>sum+(Number(x.qty)||1),0);
+      s.unplacedStacks=s.unplaced.length;
+      s.unplacedPallets=s.unplaced.reduce((sum,x)=>sum+(Number(x.qty)||1),0);
+      valid.push(s);
     }
-    valid.sort((a,b)=>a.score-b.score);
-    return valid.length?{ok:true,solutions:valid.slice(0,3),timedOut:this.timedOut}:{ok:false,timedOut:this.timedOut,message:this.timedOut?'Se alcanzó el límite de tiempo sin encontrar un acomodo válido. Bloquea las pilas correctas o compacta primero.':'No se encontró un acomodo válido. La IA probó movimientos y rotaciones permitidas, pero ninguna secuencia completa pasó la validación.'};
+    valid.sort((a,b)=>
+      b.loadedPallets-a.loadedPallets ||
+      b.loadedStacks-a.loadedStacks ||
+      a.score-b.score
+    );
+    return valid.length?{ok:true,solutions:valid.slice(0,3),timedOut:this.timedOut}:{ok:false,timedOut:this.timedOut,message:'No se pudo colocar ninguna pila adicional de forma válida. Revisa las pilas bloqueadas y las dimensiones.'};
   }
 }
 
@@ -569,7 +624,7 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       setTimeout(()=>{
         const before=clone(this.state.stacks);const beforeUsed=Geometry.usedLength(before);const engine=new LoadEngine(this.state.trailer,{timeLimitMs:9000,patterns:this.patternMemory.patterns});const report=engine.optimize(before);
         if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return;}
-        const solutions=report.solutions;this.lastSolutions=solutions;
+        const solutions=report.solutions;this.lastSolutions=solutions;this.lastUnplaced=solutions[0]?.unplaced||[];
         if(!solutions.length){$("optimizerSummary").textContent="No se encontró una solución válida.";return;}
         const best=solutions[0];
         const validation=validateLayout(best.stacks,this.state.trailer);
@@ -577,7 +632,8 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
         this.store.remember();this.state.stacks=clone(best.stacks);this.render();
         const saved=Math.max(0,beforeUsed-best.used);
         const moveDetails=best.stacks.map(s=>{const o=before.find(x=>x.id===s.id);if(!o)return null;const dx=s.x-o.x,dy=s.y-o.y;return (Math.abs(dx)>EPS||Math.abs(dy)>EPS)?`${s.name}: x ${o.x.toFixed(1)}→${s.x.toFixed(1)}, y ${o.y.toFixed(1)}→${s.y.toFixed(1)}`:null;}).filter(Boolean);
-        $("optimizerSummary").textContent=`Aplicada la mejor solución: ${best.moved} pilas movidas · ${saved.toFixed(1)}\" menos de largo.${report.timedOut?" Resultado seguro dentro del límite de 9 s.":""}${moveDetails.length?" "+moveDetails.slice(0,3).join(" · "):""}`;
+        const leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?"":"s"} (${best.unplacedPallets} pallets) fuera: ${best.unplaced.slice(0,4).map(s=>s.name).join(", ")}${best.unplaced.length>4?"…":""}`:" · Toda la carga quedó dentro";
+        $("optimizerSummary").textContent=`Aplicada: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets cargados · ${best.moved} movidas · ${saved.toFixed(1)}\" menos de largo${leftText}.${report.timedOut?" Mejor resultado seguro encontrado en 9 s.":""}`;
         this.renderSolutions(solutions,beforeUsed);
         this.toast(best.moved?`IA movió ${best.moved} pila${best.moved===1?"":"s"}`:"La carga ya estaba en la mejor posición encontrada");
       },30);
@@ -586,7 +642,8 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Mat
       const root=$("optimizerResults");root.innerHTML="";
       solutions.forEach((sol,i)=>{
         const card=document.createElement("article");card.className="optimizerResult";
-        card.innerHTML=`<div><strong>${i===0?"Mejor solución":`Alternativa ${i+1}`}</strong><p>${sol.used.toFixed(1)}\" usados · ${Math.max(0,beforeUsed-sol.used).toFixed(1)}\" ahorro · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.moved} movidas · ${sol.rotated||0} giradas</p></div><button type="button">Aplicar</button>`;
+        const left=sol.unplacedStacks?` · <b>${sol.unplacedStacks} fuera</b> (${sol.unplacedPallets} pallets): ${sol.unplaced.slice(0,3).map(s=>s.name).join(", ")}${sol.unplaced.length>3?"…":""}`:" · <b>Carga completa</b>";
+        card.innerHTML=`<div><strong>${i===0?"Mejor solución":`Alternativa ${i+1}`}</strong><p>${sol.loadedStacks} pilas / ${sol.loadedPallets} pallets dentro · ${sol.used.toFixed(1)}\" usados · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.rotated||0} giradas${left}</p></div><button type="button">Aplicar</button>`;
         card.querySelector("button").onclick=()=>{const validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Solución inválida: ${explainValidation(validation)}`);this.store.remember();this.state.stacks=clone(sol.stacks);this.render();this.toast("Solución validada y aplicada");};root.appendChild(card);
       });
     }
