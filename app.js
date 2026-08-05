@@ -100,7 +100,6 @@ function refineLayout(input,trailer,passes=20){
 }
 
 // ===== engine/optimizer.js =====
-
 const isFourWay = s => String(s.type || '').toLowerCase().replace(/[^a-z0-9]/g, '') === '4way';
 const samePose = (a,b) => Math.abs(a.x-b.x)<EPS && Math.abs(a.y-b.y)<EPS && Math.abs(a.w-b.w)<EPS && Math.abs(a.l-b.l)<EPS;
 
@@ -212,6 +211,80 @@ class LoadEngine {
     const preferred={large:'Conservadora',small:'Compacta',rows:'Filas',restart:'Reinicio'}[this.profile];
     if(!preferred)return groups;
     return [...groups.filter(g=>g.family===preferred),...groups.filter(g=>g.family!==preferred)];
+  }
+
+  structuralProfiles(movable){
+    const area=s=>s.w*s.l;
+    const small=s=>Math.min(s.w,s.l)<=28.5;
+    const medium=s=>!small(s)&&Math.min(s.w,s.l)<40;
+    const large=s=>Math.min(s.w,s.l)>=40;
+    const groups={small:movable.filter(small),medium:movable.filter(medium),large:movable.filter(large)};
+    const byAreaDesc=a=>[...a].sort((x,y)=>area(y)-area(x)||y.l-x.l);
+    const byAreaAsc=a=>[...a].sort((x,y)=>area(x)-area(y)||x.l-y.l);
+    const interleave=(a,b,c)=>{const out=[];const lists=[a,b,c].map(x=>[...x]);let i=0;while(lists.some(x=>x.length)){const list=lists[i++%lists.length];if(list.length)out.push(list.shift());}return out;};
+    return [
+      {name:'Estructura V2 · grandes→medianas→pequeñas',family:'Estructura global',mode:'dense',order:[...byAreaDesc(groups.large),...byAreaDesc(groups.medium),...byAreaDesc(groups.small)]},
+      {name:'Estructura V2 · pequeñas en extremos',family:'Estructura global',mode:'fill',order:[...byAreaAsc(groups.small),...byAreaDesc(groups.large),...byAreaDesc(groups.medium)]},
+      {name:'Estructura V2 · bloques intercalados',family:'Estructura global',mode:'balanced',order:interleave(byAreaDesc(groups.large),byAreaDesc(groups.medium),byAreaAsc(groups.small))},
+      {name:'Estructura V2 · medianas como puente',family:'Estructura global',mode:'bridge',order:[...byAreaDesc(groups.medium),...byAreaDesc(groups.large),...byAreaAsc(groups.small)]},
+      {name:'Estructura V2 · inversión completa',family:'Estructura global',mode:'reverse',order:[...byAreaAsc(movable)].reverse()}
+    ];
+  }
+
+  structuralRowPack(order,locked,originals,mode='balanced'){
+    // Motor V2: decide primero la estructura de cada fila y luego coloca sus piezas.
+    // No conserva el esqueleto de una solución previa.
+    if(locked.length)return null;
+    const remaining=order.map(Geometry.clone), placed=[];
+    let y=0, guard=0;
+    const maxPerRow=4;
+    while(remaining.length&&this.hasTime()&&guard++<originals.length+8){
+      const pool=remaining.slice(0,Math.min(16,remaining.length));
+      const combos=[];
+      const dfs=(chosen,usedWidth,depth,start)=>{
+        if(chosen.length){
+          const qty=chosen.reduce((n,o)=>n+(Number(o.qty)||1),0);
+          const widthGap=this.trailer.width-usedWidth;
+          const rowDepth=Math.max(...chosen.map(o=>o.l));
+          const area=chosen.reduce((n,o)=>n+o.w*o.l,0);
+          const depthPenalty=mode==='fill'?rowDepth*0.35:mode==='dense'?rowDepth*0.15:rowDepth*0.25;
+          const smallBonus=mode==='fill'?chosen.filter(o=>Math.min(o.w,o.l)<=28.5).length*12:0;
+          const bridgeBonus=mode==='bridge'?chosen.filter(o=>Math.min(o.w,o.l)>28.5&&Math.min(o.w,o.l)<40).length*10:0;
+          combos.push({chosen:[...chosen],score:qty*100+area/15-widthGap*5-depthPenalty+smallBonus+bridgeBonus,rowDepth});
+        }
+        if(chosen.length>=maxPerRow)return;
+        for(let i=start;i<pool.length;i++){
+          const s=pool[i];
+          const poses=(mode==='reverse'||mode==='bridge')?this.orientations(s):[{...s}];
+          for(const o of poses){
+            if(usedWidth+o.w>this.trailer.width+EPS)continue;
+            dfs([...chosen,o],usedWidth+o.w,Math.max(depth,o.l),i+1);
+          }
+        }
+      };
+      dfs([],0,0,0);
+      combos.sort((a,b)=>b.score-a.score||a.rowDepth-b.rowDepth);
+      let selected=null;
+      for(const combo of combos.slice(0,80)){
+        if(y+combo.rowDepth>this.trailer.length+EPS)continue;
+        let x=0;const row=[];let ok=true;
+        for(const o of combo.chosen){const c={...o,x,y};if(!Geometry.valid(c,[...placed,...row],this.trailer)){ok=false;break;}row.push(c);x+=o.w;}
+        if(ok){selected={row,ids:new Set(combo.chosen.map(o=>o.id)),depth:combo.rowDepth};break;}
+      }
+      if(!selected)break;
+      placed.push(...selected.row);
+      for(let i=remaining.length-1;i>=0;i--)if(selected.ids.has(remaining[i].id))remaining.splice(i,1);
+      y+=selected.depth;
+    }
+    if(!placed.length)return null;
+    // Intenta llenar huecos globales con las piezas restantes sin alterar la estructura base.
+    const leftovers=[];
+    for(const s of remaining){
+      const options=this.placementOptions(s,placed,80);
+      if(options.length)placed.push(options[0]);else leftovers.push(s);
+    }
+    if(!validateLayout(placed,this.trailer).ok)return null;
+    return {stacks:placed,unplaced:leftovers};
   }
 
   strategyOrders(movable){
@@ -752,6 +825,18 @@ class LoadEngine {
     }
 
     const beamWidth=movable.length>28?42:movable.length>18?68:96;
+
+    // Motor V2 por estructuras: crea planos globales completos antes de usar
+    // la búsqueda local tradicional. Cada perfil representa otra arquitectura.
+    if(!locked.length&&movable.length>=6){
+      for(const plan of this.structuralProfiles(movable)){
+        if(!this.hasTime())break;
+        const built=this.structuralRowPack(plan.order,locked,input,plan.mode);
+        if(!built)continue;
+        solutions.push({name:plan.name,family:plan.family,...built});
+        if(!built.unplaced.length)break;
+      }
+    }
 
     // Familias independientes: cada una parte de una filosofía distinta y compite
     // contra las demás. Esto evita mostrar tres retoques del mismo plano.
