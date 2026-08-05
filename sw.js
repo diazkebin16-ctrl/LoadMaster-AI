@@ -1,4 +1,4 @@
-const CACHE="loadmaster-v1.0";
+const CACHE="loadmaster-v2.1-phase2-complete";
 const ASSETS=["./","./index.html","./styles.css","./app.js","./manifest.webmanifest","./icon.svg"];
 
 self.addEventListener("install",event=>{

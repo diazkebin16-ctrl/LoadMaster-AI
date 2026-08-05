@@ -1,14 +1,12 @@
-# LoadMaster AI v2.0 — Fase 2
+# LoadMaster AI v2.1 — Fase 2 completa
 
-Esta versión inicia la Fase 2: Motor Inteligente de Optimización.
+Motor inteligente de optimización con búsqueda global y refinamiento local.
 
-## Funciones nuevas
-- Optimización completa de todas las pilas desbloqueadas.
-- Búsqueda de múltiples órdenes y rotaciones válidas.
-- Hasta tres soluciones comparables antes de aplicar cambios.
-- Detección temprana de cargas imposibles por dimensiones, área o bloqueos.
-- Métricas de uso del piso y eficiencia del área ocupada.
-- Respeta pilas bloqueadas, pallets 2-way y permisos de giro 4-way.
-- Límite de tiempo adaptativo para evitar congelar la aplicación.
-
-El tráiler predeterminado continúa siendo 96 × 628 pulgadas.
+Cambios principales:
+- Tráiler predeterminado 96 × 628.
+- Optimización global con varias órdenes y rotaciones permitidas.
+- Refinamiento automático de desviaciones pequeñas: alinea pilas con bordes y vecinas.
+- La mejor solución se aplica automáticamente y se puede deshacer.
+- Hasta tres soluciones comparables.
+- Respeta pilas bloqueadas, 2-way y restricciones de giro.
+- Caché PWA actualizada a v2.1.

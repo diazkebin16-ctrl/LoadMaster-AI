@@ -457,17 +457,77 @@
     out.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||a.y-b.y||a.x-b.x);
     return out.slice(0,36);
   }
+  function sharedEdgeContact(a,b){
+    let contact=0;
+    const verticalOverlap=Math.max(0,Math.min(a.y+a.l,b.y+b.l)-Math.max(a.y,b.y));
+    const horizontalOverlap=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
+    if(Math.abs((a.x+a.w)-b.x)<0.01 || Math.abs((b.x+b.w)-a.x)<0.01) contact+=verticalOverlap;
+    if(Math.abs((a.y+a.l)-b.y)<0.01 || Math.abs((b.y+b.l)-a.y)<0.01) contact+=horizontalOverlap;
+    return contact;
+  }
+  function layoutContact(items){
+    let contact=0;
+    for(const p of items){
+      if(Math.abs(p.x)<0.01) contact+=p.l*0.7;
+      if(Math.abs((p.x+p.w)-state.trailer.width)<0.01) contact+=p.l*0.9;
+      if(Math.abs(p.y)<0.01) contact+=p.w*0.7;
+    }
+    for(let i=0;i<items.length;i++) for(let j=i+1;j<items.length;j++) contact+=sharedEdgeContact(items[i],items[j]);
+    return contact;
+  }
   function smartScore(placed, originalById){
     const used=layoutUsed(placed);
     const area=layoutArea(placed);
     const empty=Math.max(0,state.trailer.width*used-area);
-    let movement=0, side=0;
+    const contact=layoutContact(placed);
+    let movement=0;
     placed.forEach(p=>{
-      side+=p.x;
       const o=originalById.get(p.id);
       if(o) movement+=Math.abs(p.x-o.x)+Math.abs(p.y-o.y)+(p.w!==o.w?4:0);
     });
-    return used*1e8 + empty*1e3 + movement*5 + side;
+    // Prioridad: menor largo; después menos hueco, más contacto/alineación y menor movimiento.
+    return used*1e9 + empty*1e4 - contact*250 + movement;
+  }
+
+  function refinementPositions(piece,others){
+    const xs=new Set([0,state.trailer.width-piece.w,piece.x]);
+    const ys=new Set([0,state.trailer.length-piece.l,piece.y]);
+    for(const o of others){
+      xs.add(o.x); xs.add(o.x+o.w); xs.add(o.x-piece.w); xs.add(o.x+o.w-piece.w);
+      ys.add(o.y); ys.add(o.y+o.l); ys.add(o.y-piece.l); ys.add(o.y+o.l-piece.l);
+    }
+    const out=[];
+    for(const y0 of ys) for(const x0 of xs){
+      const x=Math.round(x0*100)/100,y=Math.round(y0*100)/100;
+      const candidate={...piece,x,y};
+      if(x<0||y<0||x+piece.w>state.trailer.width||y+piece.l>state.trailer.length)continue;
+      if(!others.some(o=>localOverlaps(candidate,o)))out.push(candidate);
+    }
+    return out;
+  }
+  function refineLayout(input,originalById,deadline=Infinity){
+    let items=input.map(cloneStack), movedIds=new Set(), passes=0;
+    let currentScore=smartScore(items,originalById);
+    let improved=true;
+    while(improved && passes<10 && performance.now()<deadline){
+      improved=false;passes++;
+      const order=[...items].sort((a,b)=>(b.y+b.l)-(a.y+a.l)||b.x-a.x);
+      for(const source of order){
+        if(source.locked||performance.now()>deadline)continue;
+        const idx=items.findIndex(p=>p.id===source.id);
+        const others=items.filter(p=>p.id!==source.id);
+        let best=items[idx],bestScore=currentScore;
+        for(const c of refinementPositions(items[idx],others)){
+          const trial=[...others,c];
+          const score=smartScore(trial,originalById);
+          if(score<bestScore-0.001){best=c;bestScore=score;}
+        }
+        if(best.x!==items[idx].x||best.y!==items[idx].y){
+          movedIds.add(source.id);items[idx]=best;currentScore=bestScore;improved=true;
+        }
+      }
+    }
+    return {items,score:currentScore,moved:movedIds.size,passes,stats:solutionStats(items)};
   }
   function seededShuffle(items,seed){
     const a=[...items]; let x=seed>>>0;
@@ -544,23 +604,43 @@
     const originalById=new Map(state.stacks.map(s=>[s.id,s]));
     const deadline=performance.now()+Math.min(8000,2200+moving.length*180);
     const found=[], keys=new Set();
+    // Primero corrige desviaciones pequeñas del plano actual (ajuste local de 1 pieza).
+    const refinedCurrent=refineLayout(state.stacks,originalById,deadline);
+    if(layoutValid(refinedCurrent.items)){
+      const key=placementKey(refinedCurrent.items);keys.add(key);
+      found.push({items:refinedCurrent.items,score:refinedCurrent.score,stats:refinedCurrent.stats,refinedMoves:refinedCurrent.moved});
+    }
     for(const order of intelligentOrders(moving)){
       if(performance.now()>deadline)break;
       const node=beamPack(order,locked,deadline,originalById);
       if(!node)continue;
       const all=node.placed;
       if(all.length!==state.stacks.length||!layoutValid(all))continue;
-      const key=placementKey(all);if(keys.has(key))continue;keys.add(key);
-      found.push({items:all,score:smartScore(all,originalById),stats:solutionStats(all)});
+      // Refinamiento final: elimina pequeñas desviaciones y alinea cada pila con bordes/vecinos.
+      const refined=refineLayout(all,originalById,deadline);
+      const finalItems=refined.items;
+      const key=placementKey(finalItems);if(keys.has(key))continue;keys.add(key);
+      found.push({items:finalItems,score:refined.score,stats:refined.stats,refinedMoves:refined.moved});
       found.sort((a,b)=>a.score-b.score);
       if(found.length>8)found.length=8;
     }
     document.body.classList.remove('optimizing');
     if(!found.length){summary.textContent='No se encontró un acomodo completo válido.';toast('La carga no pudo acomodarse automáticamente');return;}
     optimizerSolutions=found.slice(0,3);
-    const current=solutionStats(state.stacks);
-    const best=optimizerSolutions[0].stats;
-    summary.textContent=`${optimizerSolutions.length} solución(es) · mejor resultado: ${Math.round(best.used)}" usados, ${Math.round(best.free)}" libres.`;
+    const beforeItems=state.stacks.map(cloneStack);
+    const current=solutionStats(beforeItems);
+    const bestSolution=optimizerSolutions[0];
+    const best=bestSolution.stats;
+    const changed=placementKey(bestSolution.items)!==placementKey(beforeItems);
+    if(changed){
+      remember();
+      const map=new Map(bestSolution.items.map(p=>[p.id,p]));
+      state.stacks.forEach(s=>Object.assign(s,map.get(s.id)||{}));
+      render();
+    }
+    summary.textContent=changed
+      ? `Mejor solución aplicada automáticamente · ${Math.round(best.used)}" usados · ${bestSolution.refinedMoves||0} ajuste(s) fino(s).`
+      : `La carga ya está en la mejor posición encontrada · ${Math.round(best.used)}" usados.`;
     results.innerHTML='';
     optimizerSolutions.forEach((sol,i)=>{
       const card=document.createElement('article');card.className='solutionCard'+(i===0?' best':'');
@@ -570,10 +650,11 @@
         <span>Libre al final<strong>${Math.round(sol.stats.free)}"</strong></span>
         <span>Eficiencia<strong>${sol.stats.efficiency.toFixed(1)}%</strong></span>
         <span>Reducción<strong>${Math.round(saved)}"</strong></span>
-      </div><button class="${i===0?'primary':''}" data-solution="${i}">Aplicar esta solución</button>`;
+        <span>Ajustes finos<strong>${sol.refinedMoves||0}</strong></span>
+      </div><button class="${i===0?'primary':''}" data-solution="${i}">${i===0&&changed?'Aplicada automáticamente':'Aplicar esta solución'}</button>`;
       results.appendChild(card);
     });
-    toast('Optimización inteligente terminada');
+    toast(changed?'Optimización aplicada: carga reacomodada':'La carga ya estaba optimizada');
   }
   function applyOptimizerSolution(index){
     const sol=optimizerSolutions[index];if(!sol)return;
@@ -754,7 +835,7 @@
       .stack{position:absolute;border:2px solid #16a34a;background:#dbeafe;display:flex;align-items:center;justify-content:center;text-align:center;font-size:10px;font-weight:bold;overflow:hidden}
       .freeZone{position:absolute;left:0;right:0;bottom:0;background:#dcfce7}.noseTag,.doorTag{position:absolute;left:50%;transform:translateX(-50%);font-weight:bold}
       .noseTag{top:2px}.doorTag{bottom:2px}</style></head><body>
-      <h1>LoadMaster AI v2.0 — Plano de carga</h1>
+      <h1>LoadMaster AI v2.1 — Plano de carga</h1>
       <p>Tráiler ${state.trailer.width}" × ${state.trailer.length}" · ${state.stacks.length} pilas · ${Math.max(0,state.trailer.length-usedLength())}" libres al final</p>
       </body></html>`);
     w.document.body.appendChild(clone);w.document.close();w.focus();setTimeout(()=>w.print(),300);
