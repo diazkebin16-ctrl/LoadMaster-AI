@@ -212,3 +212,9 @@ body{padding-bottom:92px}
 .pendingItem{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px;border:1px solid #fecaca;background:#fff7f7;border-radius:10px}
 .pendingItem small{display:block;color:#7f1d1d;margin-top:3px}
 .pendingEmpty{color:#64748b;padding:8px 0}
+
+/* v5.13 — miniaturas de patrones */
+.patternItem{grid-template-columns:64px minmax(0,1fr) auto}
+.patternThumb{width:58px;height:76px;object-fit:contain;border:1px solid var(--line);border-radius:7px;background:#eef1f5}
+.patternThumbPlaceholder{display:grid;place-items:center;width:58px;height:76px;border:1px dashed var(--line);border-radius:7px;color:var(--muted);font-size:.62rem;text-align:center;background:#f8fafc}
+@media(max-width:520px){.patternItem{grid-template-columns:52px minmax(0,1fr) auto}.patternThumb,.patternThumbPlaceholder{width:46px;height:64px}}

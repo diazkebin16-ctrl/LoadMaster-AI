@@ -1117,12 +1117,63 @@ function normalizeLibraryItem(raw={}){
   return {...raw,id:raw.id||uid(),name:String(raw.name||raw.nombre||`${l||'?'}×${w||'?'}`),w,l,maxHeight,type:raw.type||raw.tipo||'4-way',category:raw.category||raw.categoria||'Otra',canRotate:raw.canRotate!==false&&raw.canRotate!=='false'};
 }
 
+
+  function createPlanCanvas(stacks,trailer,{thumbnail=false,title="LoadMaster AI"}={}){
+    const safeStacks=Array.isArray(stacks)?stacks:[];
+    const scale=thumbnail?Math.min(1.5,100/Math.max(1,trailer.width),180/Math.max(1,trailer.length)):Math.min(4,820/Math.max(1,trailer.width),2200/Math.max(1,trailer.length));
+    const margin=thumbnail?10:34;
+    const header=thumbnail?0:74;
+    const footer=thumbnail?0:58;
+    const width=Math.max(thumbnail?120:420,Math.ceil(trailer.width*scale+margin*2));
+    const height=Math.max(thumbnail?220:620,Math.ceil(trailer.length*scale+margin*2+header+footer));
+    const canvas=document.createElement('canvas');
+    const dpr=thumbnail?1:Math.min(2,window.devicePixelRatio||1);
+    canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
+    canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;
+    const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+    ctx.fillStyle='#eef1f5';ctx.fillRect(0,0,width,height);
+    if(!thumbnail){
+      ctx.fillStyle='#111827';ctx.font='700 24px system-ui, sans-serif';ctx.fillText(title,margin,34);
+      ctx.fillStyle='#4b5563';ctx.font='15px system-ui, sans-serif';ctx.fillText(`${trailer.length}\" largo × ${trailer.width}\" ancho · ${safeStacks.length} pilas · ${safeStacks.reduce((a,x)=>a+(Number(x.qty)||0),0)} pallets`,margin,58);
+    }
+    const ox=margin,oy=margin+header;
+    ctx.fillStyle='#fff';ctx.fillRect(ox,oy,trailer.width*scale,trailer.length*scale);
+    ctx.strokeStyle='#111827';ctx.lineWidth=thumbnail?3:5;ctx.strokeRect(ox,oy,trailer.width*scale,trailer.length*scale);
+    for(const stack of [...safeStacks].sort((a,b)=>a.y-b.y||a.x-b.x)){
+      const x=ox+stack.x*scale,y=oy+stack.y*scale,w=stack.w*scale,h=stack.l*scale;
+      ctx.fillStyle=stack.locked?'#dbeafe':'#d9f2e3';ctx.fillRect(x,y,w,h);
+      ctx.strokeStyle='#16a34a';ctx.lineWidth=thumbnail?1.2:2.5;ctx.strokeRect(x,y,w,h);
+      if(!thumbnail && w>34 && h>25){
+        ctx.save();ctx.beginPath();ctx.rect(x+2,y+2,Math.max(0,w-4),Math.max(0,h-4));ctx.clip();
+        ctx.fillStyle='#111827';ctx.font=`700 ${Math.max(10,Math.min(16,w/6,h/3))}px system-ui, sans-serif`;
+        ctx.fillText(String(stack.name||`${stack.l}×${stack.w}`),x+5,y+18);
+        ctx.font='11px system-ui, sans-serif';ctx.fillText(`${Number(stack.qty)||0} alto · ${stack.type||''}`,x+5,y+33);ctx.restore();
+      }
+    }
+    if(!thumbnail){
+      const fy=oy+trailer.length*scale+34;ctx.fillStyle='#111827';ctx.font='700 15px system-ui, sans-serif';ctx.fillText('NARIZ ↑',margin,fy);
+      ctx.textAlign='right';ctx.fillText('PUERTAS ↓',width-margin,fy);ctx.textAlign='left';
+    }
+    return canvas;
+  }
+
+  function makePatternThumbnail(stacks,trailer){
+    try{return createPlanCanvas(stacks,trailer,{thumbnail:true}).toDataURL('image/jpeg',0.72);}catch{return '';}
+  }
+
   const PATTERN_STORAGE_KEY = "loadmaster-visual-patterns-v1";
 
   class PatternMemory {
     constructor(){this.patterns=this.load();}
     load(){try{const v=JSON.parse(localStorage.getItem(PATTERN_STORAGE_KEY)||"[]");return Array.isArray(v)?v:[];}catch{return [];}}
-    persist(){localStorage.setItem(PATTERN_STORAGE_KEY,JSON.stringify(this.patterns.slice(-100)));}
+    persist(){
+      const recent=this.patterns.slice(-100);
+      try{localStorage.setItem(PATTERN_STORAGE_KEY,JSON.stringify(recent));}
+      catch{
+        const light=recent.map(p=>({...p,thumbnail:""}));
+        try{localStorage.setItem(PATTERN_STORAGE_KEY,JSON.stringify(light));this.patterns=light;}catch{}
+      }
+    }
     add(pattern){this.patterns.push(pattern);this.persist();return pattern;}
     learnComplete(stacks,trailer){
       if(!Array.isArray(stacks)||!stacks.length)return null;
@@ -1149,7 +1200,7 @@ function normalizeLibraryItem(raw={}){
 
   function createPattern(name,stacks,trailer,source={}){
     const rows=detectRows(stacks);
-    return {id:uid(),version:1,name:name||`Patrón ${new Date().toLocaleDateString()}`,createdAt:new Date().toISOString(),trailer:{width:trailer.width,length:trailer.length},source:{fileName:source.fileName||'',fileSize:source.fileSize||0,fileType:source.fileType||''},rows:rows.map(r=>({y:r.y,length:r.length,signature:r.signature})),pieces:stacks.map(s=>({name:s.name,w:s.w,l:s.l,x:s.x,y:s.y,qty:s.qty,type:s.type,category:s.category,canRotate:s.canRotate!==false,rotated:!!s.rotated}))};
+    return {id:uid(),version:2,name:name||`Patrón ${new Date().toLocaleDateString()}`,createdAt:new Date().toISOString(),trailer:{width:trailer.width,length:trailer.length},source:{fileName:source.fileName||'',fileSize:source.fileSize||0,fileType:source.fileType||''},thumbnail:makePatternThumbnail(stacks,trailer),rows:rows.map(r=>({y:r.y,length:r.length,signature:r.signature})),pieces:stacks.map(s=>({name:s.name,w:s.w,l:s.l,x:s.x,y:s.y,qty:s.qty,type:s.type,category:s.category,canRotate:s.canRotate!==false,rotated:!!s.rotated}))};
   }
 
   const STRATEGY_STORAGE_KEY = "loadmaster-strategies-v1";
@@ -1208,6 +1259,7 @@ function normalizeLibraryItem(raw={}){
       $("clearBtn").onclick=()=>{if(!this.state.stacks.length)return;this.store.remember();this.state.stacks=[];this.state.selectedId=null;this.render();};
       $("demoBtn").onclick=()=>this.demo();
       $("saveLoadBtn").onclick=()=>this.saveFile(); $("openLoadBtn").onclick=()=>$("fileInput").click();
+      $("saveImageBtn").onclick=()=>this.saveImage();
       $("fileInput").onchange=e=>this.openFile(e); $("printBtn").onclick=()=>window.print();
       $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;$("retryPendingBtn").onclick=()=>this.retryPending();$("clearPendingBtn").onclick=()=>this.clearPending();
       $("referenceImageInput").onchange=e=>this.loadReferenceImage(e);
@@ -1255,7 +1307,14 @@ function normalizeLibraryItem(raw={}){
     deletePattern(id){this.patternMemory.remove(id);this.renderPatterns();this.toast("Patrón eliminado");}
     renderPatterns(){
       const root=$("patternList");if(!root)return;$("patternCount").textContent=this.patternMemory.patterns.length;root.innerHTML="";
-      [...this.patternMemory.patterns].reverse().forEach(pattern=>{const item=document.createElement("div");item.className="patternItem";const sig=pattern.rows.map(r=>r.signature).filter(Boolean).join(" / ");item.innerHTML=`<div><strong></strong><small></small></div><span class="patternActions"><button type="button" data-use>Usar</button><button type="button" data-delete>×</button></span>`;item.querySelector("strong").textContent=pattern.name;item.querySelector("small").textContent=`${pattern.pieces.length} pilas · ${sig||"patrón libre"}${pattern.source?.fileName?" · captura: "+pattern.source.fileName:""}`;item.querySelector("[data-use]").onclick=()=>this.applyPattern(pattern.id);item.querySelector("[data-delete]").onclick=()=>this.deletePattern(pattern.id);root.appendChild(item);});
+      [...this.patternMemory.patterns].reverse().forEach(pattern=>{
+        const item=document.createElement("div");item.className="patternItem";const sig=(pattern.rows||[]).map(r=>r.signature).filter(Boolean).join(" / ");
+        const preview=pattern.thumbnail?`<img class="patternThumb" alt="Vista previa del patrón">`:`<span class="patternThumbPlaceholder">Sin vista<br>previa</span>`;
+        item.innerHTML=`${preview}<div><strong></strong><small></small></div><span class="patternActions"><button type="button" data-use>Usar</button><button type="button" data-delete>×</button></span>`;
+        if(pattern.thumbnail)item.querySelector("img").src=pattern.thumbnail;
+        item.querySelector("strong").textContent=pattern.name;item.querySelector("small").textContent=`${(pattern.pieces||[]).length} pilas · ${sig||"patrón libre"}${pattern.source?.fileName?" · captura: "+pattern.source.fileName:""}`;
+        item.querySelector("[data-use]").onclick=()=>this.applyPattern(pattern.id);item.querySelector("[data-delete]").onclick=()=>this.deletePattern(pattern.id);root.appendChild(item);
+      });
       if(!this.patternMemory.patterns.length)root.innerHTML='<div class="patternDetected">Todavía no hay patrones confirmados.</div>';
     }
     loadLibrarySelection(){
@@ -1354,7 +1413,16 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.7",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.7.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.13",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.13.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveImage(){
+      if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
+      const validation=validateLayout(this.state.stacks,this.state.trailer);
+      if(!validation.ok)return this.toast(`Corrige la carga antes de guardar la imagen: ${explainValidation(validation)}`);
+      try{
+        const canvas=createPlanCanvas(this.state.stacks,this.state.trailer,{title:"LoadMaster AI · Plano de carga"});
+        canvas.toBlob(blob=>{if(!blob)return this.toast("No se pudo crear la imagen");const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`loadmaster-plano-${new Date().toISOString().slice(0,10)}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);this.toast("Imagen PNG guardada");},"image/png");
+      }catch{this.toast("No se pudo guardar la imagen");}
+    }
     async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.pending=d.pending||[];this.state.library=(d.library||this.state.library).map(normalizeLibraryItem);this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
     renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
     render(){

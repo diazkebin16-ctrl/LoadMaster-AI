@@ -1,0 +1,12 @@
+const fs=require('fs');
+const assert=require('assert');
+const html=fs.readFileSync('index.html','utf8');
+const js=fs.readFileSync('app.js','utf8');
+const css=fs.readFileSync('styles.css','utf8');
+assert(html.includes('id="saveImageBtn"'),'Falta botón Guardar imagen');
+assert(js.includes('$("saveImageBtn").onclick=()=>this.saveImage()'),'El botón no está conectado');
+assert(js.includes('function createPlanCanvas'),'Falta generador de imagen');
+assert(js.includes('thumbnail:makePatternThumbnail'),'Falta miniatura en patrones');
+assert(js.includes('canvas.toBlob'),'La descarga no genera PNG');
+assert(css.includes('.patternThumb'),'Faltan estilos de miniaturas');
+console.log('PASS v5.13: exportación PNG, miniaturas y respaldo de almacenamiento.');

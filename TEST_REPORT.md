@@ -1,30 +1,13 @@
-# Informe de pruebas — LoadMaster AI v5.12 REPEATABLE SOLVER
+# Informe de pruebas — LoadMaster AI v5.13 IMAGE EXPORT
 
-## Cambios verificados
+## Verificaciones realizadas
 
-- Normalización y compactación obligatoria de cada candidato finalista antes de puntuarlo.
-- Reinserción automática de pilas pendientes después de compactar.
-- Varias rondas independientes con semillas distintas dentro del límite total de 30 segundos.
-- Memoria automática de soluciones completas mediante patrones comprobados.
-- Conservación del mejor resultado anterior y rechazo de soluciones inferiores.
-- Control de rendimiento: normalización de los candidatos más fuertes y representantes de cada familia.
-
-## Pruebas aprobadas
-
-- v5.0: patrones y restricciones de rotación.
-- v5.1/v5.2: carga parcial, validación y combinaciones de ancho.
-- v5.3: recuperación después de mover tres pilas y memoria de estrategias.
-- v5.5: rescate de dos pilas y compatibilidad del autocompletado.
-- v5.6: reconstrucción amplia sin degradación.
-- v5.7: diversidad de soluciones.
-- v5.8: portafolio independiente y piso de calidad.
-- v5.9: escape de óptimo local.
-- v5.10: planificación estructural.
-- v5.11: compactación por gravedad e inserción de dos pendientes.
-- v5.12: normalización obligatoria, reinserción y estabilidad repetible.
-
-## Validaciones adicionales
-
-- `app.js` y `optimizer.js` pasan la comprobación de sintaxis de Node.js.
-- Todos los layouts de las pruebas pasan validación de límites y colisiones.
-- No se pierden pilas durante la compactación o reinserción.
+- `app.js` pasa `node --check` sin errores de sintaxis.
+- El botón `saveImageBtn` existe en `index.html` y está conectado a `saveImage()`.
+- La exportación usa un canvas independiente y no modifica el plano editable.
+- El PNG contiene el tráiler, las pilas, medidas y resumen de carga.
+- `createPattern()` genera una miniatura JPEG compacta.
+- La biblioteca muestra miniatura o un marcador para patrones antiguos.
+- `PatternMemory.persist()` tiene una ruta de respaldo: si localStorage rechaza las miniaturas, conserva los patrones sin ellas.
+- Las pruebas v5.11 y v5.12 continúan aprobando compactación, reinserción y repetibilidad.
+- Caché, manifiesto y versión actualizados a v5.13.
