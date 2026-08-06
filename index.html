@@ -1,299 +1,297 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 5.19 — CLEAN WORKSPACE</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css">
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
+<meta content="#111827" name="theme-color"/>
+<title>LoadMaster AI 5.30 — PHOTO LOAD READER</title>
+<link href="manifest.webmanifest" rel="manifest"/>
+<link href="styles.css" rel="stylesheet"/>
 </head>
 <body>
 <header class="topbar">
-  <div>
-    <h1>LoadMaster AI</h1>
-    <p>Engine v10 · interfaz compacta y espacio de trabajo ampliado · v5.19</p>
-  </div>
-  <button id="installBtn" class="primary" hidden>Instalar</button>
+<div>
+<h1>LoadMaster AI</h1>
+<p>Engine v14 · lectura de carga desde foto · v5.30</p>
+</div>
+<button class="primary" hidden="" id="installBtn">Instalar</button>
 </header>
-
-<main class="app">
-  <aside class="sidebar">
-    <section class="card versionCard"><strong>v5.19 CLEAN WORKSPACE</strong> · Configuración compacta, catálogo simplificado y plano con más espacio.</section>
-    <details id="trailerSettings" class="card collapsibleCard">
-      <summary><span>Configuración del tráiler</span><small id="trailerSummary">96 × 628 pulg.</small></summary>
-      <div class="detailsBody">
-      <label>Modelo guardado
+<main class="app"><aside class="sidebar sidebarTop"><section class="card versionCard"><strong>v5.30 PHOTO LOAD READER</strong> · Lee órdenes de pallets desde cámara o fotografía con revisión antes de agregarlas.</section><details class="card collapsibleCard accordionPanel" id="trailerSettings">
+<summary><span>Configuración del tráiler</span><small id="trailerSummary">96 × 628 pulg.</small></summary>
+<div class="detailsBody">
+<label>Modelo guardado
         <select id="trailerPreset">
-          <option value="96x628" selected>96×628</option>
-          <option value="96x300">96×300</option>
-          <option value="96x330">96×330</option>
-          <option value="95x574">95×574</option>
-          <option value="96x574">96×574</option>
-          <option value="95x628">95×628</option>
-          <option value="98x628">98×628</option>
-          <option value="custom">Personalizado</option>
-        </select>
-        <small id="trailerAutofillStatus" class="autofillStatus">Selecciona un modelo para autocompletar el tráiler.</small>
-      </label>
-      <div class="grid2">
-        <label>Largo (pulg.) — IZQUIERDA
-          <input id="trailerLength" type="number" min="1" value="628">
-        </label>
-        <label>Ancho (pulg.) — DERECHA
-          <input id="trailerWidth" type="number" min="1" value="96">
-        </label>
-      </div>
-      <button id="applyTrailer">Aplicar</button>
-      </div>
-    </details>
-
-    <section class="card">
-      <h2>Agregar pallet</h2>
-      <label>Biblioteca
-        <select id="librarySelect">
-          <option value="">— Nueva medida —</option>
-        </select>
-        <small id="libraryAutofillStatus" class="autofillStatus">Selecciona una medida guardada para autocompletar el pallet.</small>
-      </label>
-      <div class="grid2">
-        <label>Largo — IZQUIERDA
-          <input id="palletLength" type="number" min="1" value="40">
-        </label>
-        <label>Ancho — DERECHA
-          <input id="palletWidth" type="number" min="1" value="48">
-        </label>
-        <label>Cantidad total
-          <input id="palletQty" type="number" min="1" value="1">
-        </label>
-        <label>Máximo por pila
-          <input id="maxHeight" type="number" min="1" value="13">
-        </label>
-        <label>Tipo
-          <select id="palletType">
-            <option value="4-way">4-way</option>
-            <option value="2-way">2-way</option>
-          </select>
-        </label>
-        <label>Categoría
-          <select id="category">
-            <option>New</option>
-            <option>Combo</option>
-            <option>Refurbished</option>
-            <option>HT</option>
-            <option>Otra</option>
-          </select>
-        </label>
-      </div>
-      <label class="checkrow">
-        <input id="canRotate" type="checkbox" checked>
-        Se puede girar
-      </label>
-      <label>Nombre / medida
-        <input id="palletName" type="text" value="48×40">
-      </label>
-      <div class="grid2">
-        <button id="saveLibrary">Guardar medida</button>
-        <button id="addPallet" class="primary">Crear pilas</button>
-      </div>
-    </section>
-
-
-    <section class="card compactCatalogCard">
-      <div class="catalogHeader">
-        <div><h2>Catálogo de pallets</h2><p class="cardHelp">Administra el catálogo sin repetir la lista del selector “Biblioteca”.</p></div>
-        <button id="newCatalogItem" type="button">Agregar nuevo</button>
-      </div>
-      <label>Buscar en medidas guardadas
-        <input id="catalogSearch" type="search" placeholder="Nombre, medida, tipo o categoría">
-        <small id="catalogSearchStatus" class="cardHelp">La búsqueda filtra el selector Biblioteca de arriba.</small>
-      </label>
-      <div class="catalogToolbar">
-        <button id="exportCatalog" type="button">Exportar catálogo</button>
-        <button id="importCatalog" type="button">Importar catálogo</button>
-      </div>
-      <input id="catalogImportInput" type="file" accept="application/json,.json" hidden>
-      <div id="catalogList" hidden></div>
-    </section>
-
-    <section class="card visualLearningCard">
-      <h2>Aprendizaje visual</h2>
-      <p class="cardHelp">Importa una captura, reproduce o corrige el acomodo en el tráiler y guárdalo como patrón confirmado.</p>
-      <label>Captura de referencia
-        <input id="referenceImageInput" type="file" accept="image/png,image/jpeg,image/webp">
-      </label>
-      <div id="referencePreview" class="referencePreview"><span>Sin captura seleccionada</span></div>
-      <label>Nombre del patrón
-        <input id="patternName" type="text" placeholder="Ej. 34+34+28 — carga real">
-      </label>
-      <div id="patternEditStatus" class="patternEditStatus" hidden></div>
-      <div class="grid2">
-        <button id="learnPatternBtn" class="primary" type="button">Guardar patrón</button>
-        <button id="analyzePatternBtn" type="button">Detectar filas</button>
-      </div>
-      <button id="cancelPatternEdit" type="button" hidden>Cancelar edición del patrón</button>
-      <div class="patternStats"><span>Patrones guardados</span><strong id="patternCount">0</strong></div>
-      <div id="patternList" class="patternList"></div>
-      <p class="privacyNote">La imagen no se sube a internet. Solo se guarda el patrón geométrico confirmado.</p>
-    </section>
-
-    <div class="compatibilityControls" hidden aria-hidden="true">
-      <div id="selectedInfo">Ninguna seleccionada</div>
-      <button id="rotateBtn" type="button">Girar</button>
-      <button id="lockBtn" type="button">Bloquear</button>
-      <button id="duplicateBtn" type="button">Duplicar</button>
-      <button id="deleteBtn" type="button">Eliminar</button>
-    </div>
-
-    <section class="card">
-      <h2>Herramientas</h2>
-      <div class="buttonGrid">
-        <button id="undoBtn">Deshacer</button>
-        <button id="redoBtn">Rehacer</button>
-        <button id="compactBtn">Compactar</button>
-        <button id="optimizeBtn" class="primary">Optimización IA</button>
-        <button id="clearBtn">Vaciar carga</button>
-        <button id="demoBtn">Cargar ejemplo</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Guardar / exportar</h2>
-      <div class="buttonGrid">
-        <button id="saveLoadBtn">Guardar archivo</button>
-        <button id="openLoadBtn">Abrir archivo</button>
-        <button id="saveImageBtn">Guardar imagen</button>
-        <button id="printBtn">Imprimir</button>
-        <button id="saveReportBtn" class="primary">Reporte profesional PDF</button>
-        <button id="shareReportBtn">Compartir / WhatsApp</button>
-      </div>
-      <input id="fileInput" type="file" accept=".json" hidden>
-    </section>
-
-    <section class="card visualHistoryCard">
-      <div class="historyHeader">
-        <div><h2>Historial visual</h2><p class="cardHelp">Guarda manualmente las cargas importantes. La app conserva además las últimas 10 optimizaciones.</p></div>
-        <button id="saveHistoryBtn" type="button" class="primary">Guardar en historial</button>
-      </div>
-      <label>Nombre de la carga
-        <input id="historyName" type="text" placeholder="Ej. Orden 2458 · Cliente A">
-      </label>
-      <h3>Guardadas por mí</h3>
-      <div id="savedHistoryList" class="historyList"></div>
-      <h3>Últimas 10 optimizaciones</h3>
-      <div id="recentHistoryList" class="historyList"></div>
-      <details class="advancedSettings">
-        <summary>Configuración avanzada</summary>
-        <p>El aprendizaje interno ayuda a repetir soluciones exitosas. Restablécelo solamente si hay un problema técnico.</p>
-        <button id="clearInternalLearning" type="button" class="subtleDanger">Restablecer aprendizaje interno</button>
-      </details>
-    </section>
-
-    <!-- Compatibilidad de regresión: v5.16 PATTERNS & STATISTICS -->
-    <section class="card loadStatsCard">
-      <div class="statsCardHeader">
-        <div><h2>Estadísticas de carga</h2><p>Resumen técnico del plano actual.</p></div>
-        <strong id="statsGrade" class="statsGrade">0.0%</strong>
-      </div>
-      <div class="loadStatsGrid">
-        <div><span>Área utilizada</span><strong id="statsUsedArea">0 in²</strong></div>
-        <div><span>Área libre</span><strong id="statsFreeArea">0 in²</strong></div>
-        <div><span>Espacio muerto</span><strong id="statsDeadArea">0 in²</strong></div>
-        <div><span>Huecos internos</span><strong id="statsGapCount">0</strong></div>
-        <div><span>Altura máxima</span><strong id="statsMaxHeight">0 pallets</strong></div>
-        <div><span>Largo restante</span><strong id="statsRemainingLength">0"</strong></div>
-        <div><span>Tiempo de optimización</span><strong id="statsOptimizeTime">—</strong></div>
-        <div><span>Estrategia ganadora</span><strong id="statsWinningStrategy">Manual / sin optimizar</strong></div>
-      </div>
-    </section>
-
-    <section class="card efficiencyCard">
-      <h2>Indicador de eficiencia</h2>
-      <div class="efficiencyLayout">
-        <div id="efficiencyRing" class="efficiencyRing" style="--score:0"><strong id="efficiencyScore">0.0%</strong></div>
-        <div><strong id="efficiencyLabel">Baja</strong><p id="efficiencyExplanation">Agrega una carga para calcular la eficiencia.</p></div>
-      </div>
-    </section>
-
-    <section class="metrics">
-      <div><span>Pilas</span><strong id="metricStacks">0</strong></div>
-      <div><span>Pallets</span><strong id="metricPallets">0</strong></div>
-      <div><span>Largo usado</span><strong id="metricUsed">0"</strong></div>
-      <div><span>Libre al final</span><strong id="metricFree">628"</strong></div>
-      <div><span>Uso del piso</span><strong id="metricUtilization">0%</strong></div>
-      <div><span>Eficiencia</span><strong id="metricEfficiency">0%</strong></div>
-      <div class="wide"><span>Estado</span><strong id="metricStatus">Carga válida</strong></div>
-    </section>
-  </aside>
-
-  <section class="workspace">
-    <div class="workspaceTop">
-      <div>
-        <strong>NARIZ</strong>
-        <p>Toca y arrastra. Puedes dejar una pila fuera del tráiler; en rojo significa fuera o en conflicto.</p>
-      </div>
-      <div class="legend">
-        <span><i class="valid"></i> Válida</span>
-        <span><i class="invalid"></i> Conflicto</span>
-        <span><i class="locked"></i> Bloqueada</span>
-      </div>
-    </div>
-
-    <div class="canvasWrap">
-      <div id="trailer" class="trailer">
-        <div class="noseTag">NARIZ</div>
-        <div class="doorTag">PUERTAS</div>
-        <div id="freeZone" class="freeZone"></div>
-
-      </div>
-    </div>
-    <p class="tip"><strong>Engine v4 REAL:</strong> optimiza sobre una copia virtual, valida límites y colisiones antes de aplicar, y rechaza cualquier solución insegura.</p>
-    <section id="optimizerPanel" class="optimizerPanel" hidden>
-      <div class="optimizerHeader">
-        <div><strong>Resultados de optimización</strong><p id="optimizerSummary">Buscando soluciones…</p></div>
-        <button id="closeOptimizer" type="button">Cerrar</button>
-      </div>
-      <div id="optimizerResults" class="optimizerResults"></div>
-      <section class="pendingSection">
-        <div class="pendingHeader"><strong>Carga pendiente (<span id="pendingCount">0</span>)</strong><span><button id="retryPendingBtn" type="button">Reintentar</button><button id="clearPendingBtn" type="button">Eliminar pendientes</button></span></div>
-        <div id="pendingList" class="pendingList"><div class="pendingEmpty">No hay pilas pendientes.</div></div>
-      </section>
-
-    </section>
-  </section>
-</main>
-
-
-<div id="floatingTools" class="bottomTools" hidden>
-  <div id="bottomSelectedName" hidden></div>
-  <div class="bottomToolButtons">
-    <button id="floatRotateBtn" class="floatPrimary" type="button">↻ Girar</button>
-    <button id="floatLockBtn" type="button">🔒 Bloq.</button>
-    <button id="floatDeleteBtn" type="button">🗑 Eliminar</button>
-  </div>
+<option selected="" value="96x628">96×628</option>
+<option value="96x300">96×300</option>
+<option value="96x330">96×330</option>
+<option value="95x574">95×574</option>
+<option value="96x574">96×574</option>
+<option value="95x628">95×628</option>
+<option value="98x628">98×628</option>
+<option value="custom">Personalizado</option>
+</select>
+<small class="autofillStatus" id="trailerAutofillStatus">Selecciona un modelo para autocompletar el tráiler.</small>
+</label>
+<div class="grid2">
+<label>Largo (pulg.) — IZQUIERDA
+          <input id="trailerLength" min="1" type="number" value="628"/>
+</label>
+<label>Ancho (pulg.) — DERECHA
+          <input id="trailerWidth" min="1" type="number" value="96"/>
+</label>
+</div>
+<button id="applyTrailer">Aplicar</button>
+</div>
+</details><section class="card quickToolsCard" id="quickToolsCard"><h2>Herramientas</h2><p class="cardHelp">Acciones principales para optimizar y revisar la carga.</p><div class="primaryToolGrid"><button class="primary" id="optimizeBtn">Optimización IA</button><button id="retryOptimizeBtn" type="button">Reintentar</button><button id="compactBtn">Compactar</button><button class="primary" id="manualModeBtn" type="button">Acomodar manualmente</button><button hidden="" id="finishManualBtn" type="button">Finalizar edición</button></div><details class="moreTools"><summary>Más herramientas</summary><div class="moreToolsBody"><div class="buttonGrid"><button id="undoBtn">Deshacer</button><button id="redoBtn">Rehacer</button><button id="clearBtn">Vaciar carga</button><button id="demoBtn">Cargar ejemplo</button></div><h3>Entrada inteligente</h3><p class="cardHelp">Disponible únicamente con Internet. Sin conexión puedes continuar agregando pallets manualmente.</p><div class="buttonGrid"><button class="primary" id="scanCameraBtn" type="button">Tomar foto de la orden</button><button id="scanGalleryBtn" type="button">Elegir foto</button></div><input accept="image/jpeg,image/png,image/webp" capture="environment" hidden id="scanCameraInput" type="file"/><input accept="image/jpeg,image/png,image/webp" hidden id="scanGalleryInput" type="file"/><h3>Guardar / exportar</h3><input accept=".json" hidden="" id="fileInput" type="file"/><div class="buttonGrid"><button id="saveLoadBtn">Guardar archivo</button><button id="openLoadBtn">Abrir archivo</button><button id="saveImageBtn">Guardar imagen</button><button id="printBtn">Imprimir</button><button class="primary" id="saveReportBtn">Reporte profesional PDF</button><button id="shareReportBtn">Compartir / WhatsApp</button></div></div></details></section></aside><section class="workspace">
+<div class="workspaceTop">
+<div>
+<strong id="planModeTitle">Plano compacto</strong>
+<p id="planModeHelp">Vista horizontal para revisar el resultado de la automatización. Las medidas reales no cambian.</p>
 </div>
 
-<dialog id="catalogDialog" class="catalogDialog">
-  <form method="dialog" onsubmit="return false">
-    <div class="catalogDialogHeader"><h2 id="catalogDialogTitle">Nuevo pallet</h2><button type="button" onclick="document.getElementById('catalogDialog').close()">×</button></div>
-    <input id="catalogEditId" type="hidden">
-    <label>Nombre<input id="catalogName" type="text" required></label>
-    <div class="grid2">
-      <label>Largo<input id="catalogLength" type="number" min="1" required></label>
-      <label>Ancho<input id="catalogWidth" type="number" min="1" required></label>
-      <label>Altura máxima<input id="catalogMaxHeight" type="number" min="1" value="20" required></label>
-      <label>Tipo<select id="catalogType"><option value="4-way">4-way</option><option value="2-way">2-way</option><option value="Block">Block</option><option value="Crate">Crate</option></select></label>
-    </div>
-    <label>Categoría<input id="catalogCategory" type="text" value="Otra"></label>
-    <label>Notas<textarea id="catalogNotes" rows="3"></textarea></label>
-    <label class="checkrow"><input id="catalogCanRotate" type="checkbox" checked> Se puede girar</label>
-    <label class="checkrow"><input id="catalogFavorite" type="checkbox"> Favorito</label>
-    <button id="saveCatalogEdit" class="primary" type="button">Guardar pallet</button>
-  </form>
+<div class="legend">
+<span><i class="valid"></i> Válida</span>
+<span><i class="invalid"></i> Conflicto</span>
+<span><i class="locked"></i> Bloqueada</span>
+</div>
+</div>
+<div class="compactPlanWrap" id="compactPlanWrap">
+<canvas aria-label="Vista compacta horizontal del plano del tráiler" id="compactPlanCanvas"></canvas>
+<div class="compactPlanHint">Vista de revisión · toca “Acomodar manualmente” para editar</div>
+</div>
+<div class="canvasWrap" hidden="" id="manualCanvasWrap">
+<div class="trailer" id="trailer">
+<div class="noseTag">NARIZ</div>
+<div class="doorTag">PUERTAS</div>
+<div class="freeZone" id="freeZone"></div>
+</div>
+</div>
+<p class="tip"><strong>Engine v4 REAL:</strong> optimiza sobre una copia virtual, valida límites y colisiones antes de aplicar, y rechaza cualquier solución insegura.</p>
+<section class="optimizerPanel" hidden="" id="optimizerPanel">
+<div class="optimizerHeader">
+<div><strong>Resultados de optimización</strong><p id="optimizerSummary">Buscando soluciones…</p></div>
+<button id="closeOptimizer" type="button">Cerrar</button>
+</div>
+<div class="progressiveStatus active" id="progressiveStatus" hidden><span class="progressivePulse" aria-hidden="true"></span><span id="progressiveStatusText">Preparando optimización progresiva…</span><button id="stopProgressiveBtn" type="button">Detener búsqueda</button></div><div class="progressiveOffer" id="progressiveOffer" hidden><strong>La IA encontró una mejora</strong><p id="progressiveOfferText"></p><div class="progressiveOfferActions"><button class="primary" id="applyProgressiveBtn" type="button">Aplicar mejora</button><button id="compareProgressiveBtn" type="button">Ver comparación</button><button id="ignoreProgressiveBtn" type="button">Ignorar</button></div></div><div class="optimizerResults" id="optimizerResults"></div>
+<section class="pendingSection">
+<div class="pendingHeader"><strong>Carga pendiente (<span id="pendingCount">0</span>)</strong><span><button id="retryPendingBtn" type="button">Reintentar</button><button id="clearPendingBtn" type="button">Eliminar pendientes</button></span></div>
+<div class="pendingList" id="pendingList"><div class="pendingEmpty">No hay pilas pendientes.</div></div>
+</section>
+</section>
+</section><aside class="sidebar sidebarBottom"><section class="card">
+<h2>Agregar pallet</h2>
+<label>Biblioteca
+        <select id="librarySelect">
+<option value="">— Nueva medida —</option>
+</select>
+<small class="autofillStatus" id="libraryAutofillStatus">Selecciona una medida guardada para autocompletar el pallet.</small>
+</label>
+<div class="grid2">
+<label>Largo — IZQUIERDA
+          <input id="palletLength" min="1" type="number" value="40"/>
+</label>
+<label>Ancho — DERECHA
+          <input id="palletWidth" min="1" type="number" value="48"/>
+</label>
+<label>Cantidad total
+          <input id="palletQty" min="1" type="number" value="1"/>
+</label>
+<label>Máximo por pila
+          <input id="maxHeight" min="1" type="number" value="13"/>
+</label>
+<label>Tipo
+          <select id="palletType">
+<option value="4-way">4-way</option>
+<option value="2-way">2-way</option>
+</select>
+</label>
+<label>Categoría
+          <select id="category">
+<option>New</option>
+<option>Combo</option>
+<option>Refurbished</option>
+<option>HT</option>
+<option>Otra</option>
+</select>
+</label>
+</div>
+<label class="checkrow">
+<input checked="" id="canRotate" type="checkbox"/>
+        Se puede girar
+      </label>
+<label>Nombre / medida
+        <input id="palletName" type="text" value="48×40"/>
+</label>
+<div class="grid2">
+<button id="saveLibrary">Guardar medida</button>
+<button class="primary" id="addPallet">Crear pilas</button>
+</div>
+</section><section class="card visualLearningCard">
+<h2>Aprendizaje visual</h2>
+<p class="cardHelp">Importa una captura, reproduce o corrige el acomodo en el tráiler y guárdalo como patrón confirmado.</p>
+<label>Captura de referencia
+        <input accept="image/png,image/jpeg,image/webp" id="referenceImageInput" type="file"/>
+</label>
+<div class="referencePreview" id="referencePreview"><span>Sin captura seleccionada</span></div>
+<label>Nombre del patrón
+        <input id="patternName" placeholder="Ej. 34+34+28 — carga real" type="text"/>
+</label>
+<div class="patternEditStatus" hidden="" id="patternEditStatus"></div>
+<div class="grid2">
+<button class="primary" id="learnPatternBtn" type="button">Guardar patrón</button>
+<button id="analyzePatternBtn" type="button">Detectar filas</button>
+</div>
+<button hidden="" id="cancelPatternEdit" type="button">Cancelar edición del patrón</button>
+<div class="patternStats"><span>Patrones guardados</span><strong id="patternCount">0</strong></div>
+<div class="patternList" id="patternList"></div>
+<p class="privacyNote">La imagen no se sube a internet. Solo se guarda el patrón geométrico confirmado.</p>
+</section><div aria-hidden="true" class="compatibilityControls" hidden="">
+<div id="selectedInfo">Ninguna seleccionada</div>
+<button id="rotateBtn" type="button">Girar</button>
+<button id="lockBtn" type="button">Bloquear</button>
+<button id="duplicateBtn" type="button">Duplicar</button>
+<button id="deleteBtn" type="button">Eliminar</button>
+</div><section class="card loadStatsCard">
+<div class="statsCardHeader">
+<div><h2>Estadísticas de carga</h2><p>Resumen técnico del plano actual.</p></div>
+<strong class="statsGrade" id="statsGrade">0.0%</strong>
+</div>
+<div class="loadStatsGrid">
+<div><span>Área utilizada</span><strong id="statsUsedArea">0 in²</strong></div>
+<div><span>Área libre</span><strong id="statsFreeArea">0 in²</strong></div>
+<div><span>Espacio muerto</span><strong id="statsDeadArea">0 in²</strong></div>
+<div><span>Huecos internos</span><strong id="statsGapCount">0</strong></div>
+<div><span>Altura máxima</span><strong id="statsMaxHeight">0 pallets</strong></div>
+<div><span>Largo restante</span><strong id="statsRemainingLength">0"</strong></div>
+<div><span>Tiempo de optimización</span><strong id="statsOptimizeTime">—</strong></div>
+<div><span>Estrategia ganadora</span><strong id="statsWinningStrategy">Manual / sin optimizar</strong></div>
+</div>
+</section><section class="card efficiencyCard">
+<h2>Indicador de eficiencia</h2>
+<div class="efficiencyLayout">
+<div class="efficiencyRing" id="efficiencyRing" style="--score:0"><strong id="efficiencyScore">0.0%</strong></div>
+<div><strong id="efficiencyLabel">Baja</strong><p id="efficiencyExplanation">Agrega una carga para calcular la eficiencia.</p></div>
+</div>
+</section><section class="metrics">
+<div><span>Pilas</span><strong id="metricStacks">0</strong></div>
+<div><span>Pallets</span><strong id="metricPallets">0</strong></div>
+<div><span>Largo usado</span><strong id="metricUsed">0"</strong></div>
+<div><span>Libre al final</span><strong id="metricFree">628"</strong></div>
+<div><span>Uso del piso</span><strong id="metricUtilization">0%</strong></div>
+<div><span>Eficiencia</span><strong id="metricEfficiency">0%</strong></div>
+<div class="wide"><span>Estado</span><strong id="metricStatus">Carga válida</strong></div>
+</section><details class="card collapsibleCard accordionPanel" id="catalogPanel"><summary><span>Catálogo de pallets</span><small id="catalogSummary">0 medidas guardadas</small></summary><div class="detailsBody">
+<div class="catalogHeader">
+<div><h2>Catálogo de pallets</h2><p class="cardHelp">Administra el catálogo sin repetir la lista del selector “Biblioteca”.</p></div>
+<button id="newCatalogItem" type="button">Agregar nuevo</button>
+</div>
+<label>Buscar en medidas guardadas
+        <input id="catalogSearch" placeholder="Nombre, medida, tipo o categoría" type="search"/>
+<small class="cardHelp" id="catalogSearchStatus">La búsqueda filtra el selector Biblioteca de arriba.</small>
+</label>
+<div class="catalogManager">
+<label>Pallet guardado
+<select id="catalogManageSelect"><option value="">— Selecciona una medida —</option></select>
+</label>
+<div class="catalogActions">
+<button id="editCatalogSelected" type="button">Editar</button>
+<button id="duplicateCatalogSelected" type="button">Duplicar</button>
+<button id="deleteCatalogSelected" class="danger" type="button">Eliminar</button>
+</div>
+</div>
+<div class="catalogToolbar">
+<button id="exportCatalog" type="button">Exportar catálogo</button>
+<button id="importCatalog" type="button">Importar catálogo</button>
+</div>
+<input accept="application/json,.json" hidden="" id="catalogImportInput" type="file"/>
+<div hidden="" id="catalogList"></div>
+</div></details><details class="card collapsibleCard accordionPanel" id="historyPanel"><summary><span>Historial visual</span><small id="historySummary">Sin registros</small></summary><div class="detailsBody">
+<div class="historyHeader">
+<div><h2>Historial visual</h2><p class="cardHelp">Guarda manualmente las cargas importantes. La app conserva además las últimas 10 optimizaciones.</p></div>
+<button class="primary" id="saveHistoryBtn" type="button">Guardar en historial</button>
+</div>
+<label>Nombre de la carga
+        <input id="historyName" placeholder="Ej. Orden 2458 · Cliente A" type="text"/>
+</label>
+<div class="historyFilters">
+<label>Buscar
+          <input id="historySearch" placeholder="Nombre, estrategia o medida del tráiler" type="search"/>
+</label>
+<label>Desde
+          <input id="historyDateFrom" type="date"/>
+</label>
+<label>Hasta
+          <input id="historyDateTo" type="date"/>
+</label>
+<label>Estado
+          <select id="historyStatusFilter"><option value="all">Todos</option><option value="complete">Completas</option><option value="pending">Con pendientes</option></select>
+</label>
+<label>Ordenar
+          <select id="historySort"><option value="newest">Más recientes</option><option value="efficiency">Mayor eficiencia</option><option value="pallets">Más pallets</option><option value="time">Menor tiempo</option><option value="name">Nombre A–Z</option></select>
+</label>
+<label class="checkrow historyFavoriteOnly"><input id="historyFavoritesOnly" type="checkbox"/> Solo favoritos</label>
+</div>
+<div class="historyBatchToolbar">
+<span><strong id="historySelectedCount">0</strong> seleccionadas</span>
+<button id="compareHistoryBtn" type="button">Comparar 2</button>
+<button id="exportHistoryPdfBtn" type="button">Reporte PDF</button>
+<button id="exportHistoryCsvBtn" type="button">Exportar CSV</button>
+<button class="subtleDanger" id="deleteHistorySelectedBtn" type="button">Eliminar selección</button>
+</div>
+<h3>Guardadas por mí <small id="savedHistoryCount"></small></h3>
+<div class="historyList" id="savedHistoryList"></div>
+<h3>Últimas 10 optimizaciones <small id="recentHistoryCount"></small></h3>
+<div class="historyList" id="recentHistoryList"></div>
+<section class="comparisonPanel" hidden="" id="comparisonPanel">
+<div class="comparisonHeader"><div><h3>Comparador de soluciones</h3><p>Dos cargas seleccionadas, comparadas con las mismas métricas.</p></div><button id="closeComparisonBtn" type="button">Cerrar</button></div>
+<div class="comparisonContent" id="comparisonContent"></div>
+</section>
+<details class="advancedSettings">
+<summary>Configuración avanzada</summary>
+<p>El aprendizaje interno ayuda a repetir soluciones exitosas. Restablécelo solamente si hay un problema técnico.</p>
+<button class="subtleDanger" id="clearInternalLearning" type="button">Restablecer aprendizaje interno</button>
+</details>
+</div></details></aside></main>
+<div class="bottomTools" hidden="" id="floatingTools">
+<div hidden="" id="bottomSelectedName"></div>
+<div class="bottomToolButtons">
+<button class="floatPrimary" id="floatRotateBtn" type="button">↻ Girar</button>
+<button id="floatLockBtn" type="button">🔒 Bloq.</button>
+<button id="floatDeleteBtn" type="button">🗑 Eliminar</button>
+</div>
+</div>
+<dialog class="photoReaderDialog" id="photoReaderDialog">
+<form method="dialog" onsubmit="return false">
+<div class="catalogDialogHeader"><div><h2>Leer carga desde foto</h2><p class="cardHelp">La fotografía se analiza por Internet. Revisa todos los datos antes de agregarlos.</p></div><button id="closePhotoReader" type="button">×</button></div>
+<div class="photoReaderSetup">
+<label>Clave de API de OpenAI (solo esta sesión)<input autocomplete="off" id="visionApiKey" placeholder="sk-…" type="password"/></label>
+<label>Modelo<input id="visionModel" type="text" value="gpt-5.6"/></label>
+<p class="securityNote">La clave no se guarda en archivos ni en el catálogo. Permanece únicamente en la memoria de esta pestaña. Para una publicación comercial se recomienda usar un servidor seguro propio.</p>
+</div>
+<div class="photoPreviewGrid"><div class="photoPreview" id="photoPreview"><span>Selecciona o toma una fotografía.</span></div><div><strong id="photoReaderStatus">Esperando imagen.</strong><p class="cardHelp" id="photoReaderHelp">La IA buscará cantidad, largo, ancho, altura y tipo 2-way o 4-way.</p><button class="primary" disabled id="analyzePhotoBtn" type="button">Analizar foto</button></div></div>
+<div hidden id="photoReviewSection"><div class="photoReviewHeader"><div><h3>Revisar datos detectados</h3><p>Corrige cualquier dato dudoso antes de agregar la carga.</p></div><button id="addPhotoRowBtn" type="button">Agregar fila</button></div><div class="photoTableWrap"><table class="photoReviewTable"><thead><tr><th>Nombre</th><th>Cantidad</th><th>Largo</th><th>Ancho</th><th>Máx./pila</th><th>Tipo</th><th>Giro</th><th>Conf.</th><th></th></tr></thead><tbody id="photoReviewBody"></tbody></table></div><div class="photoReviewActions"><button id="cancelPhotoImportBtn" type="button">Cancelar</button><button class="primary" id="confirmPhotoImportBtn" type="button">Agregar a la carga</button></div></div>
+</form>
 </dialog>
-
-<div id="toast" class="toast" aria-live="polite"></div>
-
-<script defer src="app.js?v=5.19-clean-workspace"></script>
+<dialog class="catalogDialog" id="catalogDialog">
+<form method="dialog" onsubmit="return false">
+<div class="catalogDialogHeader"><h2 id="catalogDialogTitle">Nuevo pallet</h2><button onclick="document.getElementById('catalogDialog').close()" type="button">×</button></div>
+<input id="catalogEditId" type="hidden"/>
+<label>Nombre<input id="catalogName" required="" type="text"/></label>
+<div class="grid2">
+<label>Largo<input id="catalogLength" min="1" required="" type="number"/></label>
+<label>Ancho<input id="catalogWidth" min="1" required="" type="number"/></label>
+<label>Altura máxima<input id="catalogMaxHeight" min="1" required="" type="number" value="20"/></label>
+<label>Tipo<select id="catalogType"><option value="4-way">4-way</option><option value="2-way">2-way</option><option value="Block">Block</option><option value="Crate">Crate</option></select></label>
+</div>
+<label>Categoría<input id="catalogCategory" type="text" value="Otra"/></label>
+<label>Notas<textarea id="catalogNotes" rows="3"></textarea></label>
+<label class="checkrow"><input checked="" id="catalogCanRotate" type="checkbox"/> Se puede girar</label>
+<label class="checkrow"><input id="catalogFavorite" type="checkbox"/> Favorito</label>
+<button class="primary" id="saveCatalogEdit" type="button">Guardar pallet</button>
+</form>
+</dialog>
+<div aria-live="polite" class="toast" id="toast"></div>
+<script defer="" src="app.js?v=5.30-photo-load-reader"></script>
 </body>
 </html>

@@ -1,0 +1,11 @@
+const fs=require('fs');
+const assert=require('assert');
+const html=fs.readFileSync(__dirname+'/index.html','utf8');
+const js=fs.readFileSync(__dirname+'/app.js','utf8');
+assert(html.includes('id="trailerSettings"') && html.includes('id="catalogPanel"') && html.includes('id="historyPanel"'),'Faltan paneles del acordeón');
+assert((html.match(/class="[^"]*accordionPanel/g)||[]).length>=3,'Los tres paneles deben pertenecer al acordeón');
+assert(html.includes('id="historySummary"') && html.includes('id="catalogSummary"'),'Faltan resúmenes compactos');
+assert(js.includes('bindAccordion()') && js.includes('restoreAccordionState()'),'Falta la lógica del acordeón');
+assert(js.includes('other.open=false'),'El acordeón debe cerrar las otras secciones');
+assert(js.includes('updateHistorySummary()') && js.includes('updateCatalogSummary()'),'Los resúmenes deben actualizarse');
+console.log('PASS v5.21: acordeón único, paneles compactos y resúmenes dinámicos.');

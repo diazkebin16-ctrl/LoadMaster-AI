@@ -1,0 +1,10 @@
+const fs=require('fs');
+const app=fs.readFileSync('app.js','utf8');
+const html=fs.readFileSync('index.html','utf8');
+for(const token of ['cargoProfile','strategyConfidence','recordOutcome','learnManual','loadmaster-strategies-v2-adaptive']) if(!app.includes(token)) throw new Error(`Falta ${token}`);
+if(!/trials>=3&&confidence>=0\.7/.test(app)) throw new Error('Falta promoción por evidencia mínima');
+if(!/improvement<=0\.25/.test(app)) throw new Error('Falta filtro de correcciones manuales sin mejora');
+if(!app.includes('this.strategyMemory.prepare(original,this.state.trailer)')) throw new Error('La memoria adaptativa no se prepara antes de optimizar');
+if(!app.includes('this.strategyMemory.recordOutcome(original,this.state.trailer')) throw new Error('No se registra el resultado de optimización');
+if(!html.includes('v5.25 ADAPTIVE AI')) throw new Error('Versión visual incorrecta');
+console.log('PASS v5.25: aprendizaje adaptativo por perfil, confianza y mejoras comprobadas.');

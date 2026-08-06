@@ -121,6 +121,48 @@ function solutionDistance(a,b,trailer){
   return (count?total/count:0)*0.8+missingDiff*0.2;
 }
 
+
+function intelligentSolutionRank(sol,trailer,best=null){
+  const pendingStacks=Number(sol.unplacedStacks??(sol.unplaced||[]).length)||0;
+  const pendingPallets=Number(sol.unplacedPallets??(sol.unplaced||[]).reduce((n,x)=>n+(Number(x.qty)||1),0))||0;
+  const efficiency=Math.max(0,Math.min(100,Number(sol.efficiency)||0));
+  const used=Math.max(0,Number(sol.used)||Geometry.usedLength(sol.stacks||[]));
+  const moved=Math.max(0,Number(sol.moved)||0),rotated=Math.max(0,Number(sol.rotated)||0);
+  const total=Math.max(1,(sol.stacks||[]).length+pendingStacks);
+  const completion=pendingStacks===0?48:Math.max(0,42-pendingPallets*5-pendingStacks*3);
+  const utilization=efficiency*0.24;
+  const lengthQuality=Math.max(0,10*(1-used/Math.max(1,trailer.length)));
+  const stability=Math.max(0,8-(moved/total)*5-(rotated/total)*2);
+  const compactness=Math.max(0,7-Math.min(7,(Number(sol.score)||0)/2500));
+  const learned=/aprendid|adaptativ|simulaci/i.test(`${sol.name||''} ${sol.family||''}`)?3:0;
+  const score=Math.max(0,Math.min(100,completion+utilization+lengthQuality+stability+compactness+learned));
+  const reasons=[];
+  if(!pendingStacks)reasons.push('carga completa');
+  else reasons.push(`${pendingStacks} pila${pendingStacks===1?'':'s'} pendiente${pendingStacks===1?'':'s'}`);
+  if(efficiency>=97)reasons.push('ocupación excelente');else if(efficiency>=92)reasons.push('buena ocupación');
+  if(best&&used+0.25<(Number(best.used)||Infinity))reasons.push('usa menos largo');
+  if(moved<=Math.max(1,total*.15))reasons.push('pocos movimientos');
+  const label=score>=95?'Excelente':score>=88?'Muy buena':score>=78?'Buena':score>=65?'Aceptable':'Mejorable';
+  return {rankScore:score,rankLabel:label,rankReasons:reasons.slice(0,3)};
+}
+
+function rankSolutionsIntelligently(solutions,trailer){
+  if(!solutions.length)return [];
+  const provisional=[...solutions].sort((a,b)=>
+    b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score
+  );
+  const best=provisional[0];
+  for(const sol of solutions)Object.assign(sol,intelligentSolutionRank(sol,trailer,best));
+  return [...solutions].sort((a,b)=>
+    b.loadedPallets-a.loadedPallets ||
+    b.loadedStacks-a.loadedStacks ||
+    b.rankScore-a.rankScore ||
+    a.unplacedPallets-b.unplacedPallets ||
+    a.used-b.used ||
+    a.score-b.score
+  );
+}
+
 function selectDiverseSolutions(sorted,limit,trailer){
   if(!sorted.length)return [];
   const selected=[sorted[0]],remaining=sorted.slice(1);
@@ -131,7 +173,9 @@ function selectDiverseSolutions(sorted,limit,trailer){
       const qualityGap=(sorted[0].loadedPallets-candidate.loadedPallets)*4+(sorted[0].loadedStacks-candidate.loadedStacks)*2;
       const minDistance=Math.min(...selected.map(s=>solutionDistance(candidate,s,trailer)));
       const familyBonus=selected.some(s=>s.family&&candidate.family&&s.family===candidate.family)?0:0.25;
-      const value=minDistance*10+familyBonus-qualityGap;
+      const similarityPenalty=minDistance<0.035?1.5:0;
+      const rankBonus=(Number(candidate.rankScore)||0)/40;
+      const value=minDistance*12+familyBonus+rankBonus-qualityGap-similarityPenalty;
       if(value>bestValue){bestValue=value;bestIndex=i;}
     }
     selected.push(remaining.splice(bestIndex,1)[0]);
@@ -174,7 +218,7 @@ class LoadEngine {
     const locked=input.filter(s=>s.locked);
     const lockedCheck=validateLayout(locked,this.trailer);
     if(!lockedCheck.ok)return {ok:false,message:`Pilas bloqueadas inválidas: ${explainValidation(lockedCheck)}`};
-    const refined=this.sequenceRefine(input,input,8);
+    const refined=this.automaticCompact(this.sequenceRefine(input,input,8),"deep");
     const check=validateLayout(refined,this.trailer);
     return check.ok?{ok:true,stacks:refined}:{ok:false,message:`Compactación rechazada: ${explainValidation(check)}`};
   }
@@ -833,6 +877,153 @@ class LoadEngine {
     return stacks;
   }
 
+  lateralCompact(input,direction="left"){
+    const stacks=input.map(Geometry.clone);
+    for(let pass=0;pass<10;pass++){
+      let moved=false;
+      const ordered=stacks.filter(s=>!s.locked).sort((a,b)=>direction==="left"?a.x-b.x:b.x-a.x||a.y-b.y);
+      for(const s of ordered){
+        let target=direction==="left"?0:this.trailer.width-s.w;
+        for(const o of stacks){
+          if(o.id===s.id)continue;
+          const vertical=s.y<o.y+o.l-EPS&&s.y+s.l>o.y+EPS;
+          if(!vertical)continue;
+          if(direction==="left"&&o.x+o.w<=s.x+EPS)target=Math.max(target,o.x+o.w);
+          if(direction==="right"&&o.x>=s.x+s.w-EPS)target=Math.min(target,o.x-s.w);
+        }
+        target=roundQuarter(target);
+        const improves=direction==="left"?target<s.x-EPS:target>s.x+EPS;
+        if(improves){const candidate={...s,x:target};const others=stacks.filter(o=>o.id!==s.id);if(Geometry.valid(candidate,others,this.trailer)){s.x=target;moved=true;}}
+      }
+      if(!moved)break;
+    }
+    return stacks;
+  }
+
+  automaticCompact(input,level="deep"){
+    let stacks=input.map(Geometry.clone);
+    const passes=level==="soft"?1:level==="medium"?2:4;
+    for(let i=0;i<passes;i++){
+      const before=stacks.map(s=>`${s.id}:${s.x},${s.y}`).join("|");
+      stacks=this.gravityCompact(stacks);
+      if(level!=="soft"){
+        const left=this.lateralCompact(stacks,"left");
+        const right=this.lateralCompact(stacks,"right");
+        const leftUsed=Geometry.usedLength(left),rightUsed=Geometry.usedLength(right);
+        stacks=leftUsed<=rightUsed+EPS?left:right;
+        stacks=this.gravityCompact(stacks);
+      }
+      if(level==="deep")stacks=this.sequenceRefine(stacks,input,2);
+      if(!validateLayout(stacks,this.trailer).ok)return input.map(Geometry.clone);
+      const after=stacks.map(s=>`${s.id}:${s.x},${s.y}`).join("|");
+      if(before===after)break;
+    }
+    return stacks;
+  }
+
+
+  simulateMovementSequences(placed,unplaced,originals,{maxDepth=3,beamWidth=24}={}){
+    // v5.28: ensaya secuencias completas sobre copias del plano. Ningún
+    // movimiento toca la solución visible hasta que la secuencia final supera
+    // la mejor carga conocida y pasa la validación completa.
+    const baseline=placed.map(Geometry.clone);
+    if(!validateLayout(baseline,this.trailer).ok)return [];
+    const originalMap=new Map(originals.map(s=>[s.id,s]));
+    const baselineIds=new Set(baseline.map(s=>s.id));
+    const pending=(unplaced||originals.filter(s=>!baselineIds.has(s.id))).map(Geometry.clone);
+    const baselinePallets=baseline.reduce((n,s)=>n+(Number(s.qty)||1),0);
+    const candidates=[];
+    const stateKey=st=>st.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join('|');
+    const evaluate=st=>{
+      const ids=new Set(st.map(s=>s.id));
+      const missing=originals.filter(s=>!ids.has(s.id));
+      const pallets=st.reduce((n,s)=>n+(Number(s.qty)||1),0);
+      const area=Geometry.floorArea(st);
+      const used=Geometry.usedLength(st);
+      const dead=Math.max(0,this.trailer.width*used-area);
+      return {missing,pallets,rank:pallets*1e12+st.length*1e9-area*1e3-used*1e2-dead-layoutScore(st,this.trailer,originals)};
+    };
+    const tryPending=layout=>{
+      let st=layout.map(Geometry.clone), remaining=[];
+      const ordered=[...pending].sort((a,b)=>b.w*b.l-a.w*a.l);
+      for(const piece of ordered){
+        const options=this.placementOptions(piece,st,120);
+        if(!options.length){remaining.push(piece);continue;}
+        options.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||Geometry.contactScore(b,st,this.trailer)-Geometry.contactScore(a,st,this.trailer)||a.x-b.x);
+        st.push(options[0]);
+      }
+      st=this.automaticCompact(st,'medium');
+      if(!validateLayout(st,this.trailer).ok)return null;
+      const ids=new Set(st.map(s=>s.id));
+      return {stacks:st,unplaced:originals.filter(s=>!ids.has(s.id))};
+    };
+
+    const start={stacks:baseline,moves:[]};
+    let beam=[start];
+    const globalSeen=new Set([stateKey(baseline)]);
+    for(let depth=1;depth<=maxDepth&&this.hasTime();depth++){
+      const next=[];
+      for(const state of beam){
+        if(!this.hasTime())break;
+        const movable=state.stacks.filter(s=>!s.locked).sort((a,b)=>{
+          const ac=Geometry.contactScore(a,state.stacks.filter(o=>o.id!==a.id),this.trailer);
+          const bc=Geometry.contactScore(b,state.stacks.filter(o=>o.id!==b.id),this.trailer);
+          return ac-bc||(b.y+b.l)-(a.y+a.l);
+        }).slice(0,12);
+        for(const piece of movable){
+          if(!this.hasTime())break;
+          const others=state.stacks.filter(s=>s.id!==piece.id);
+          const options=this.placementOptions(piece,others,18)
+            .filter(c=>!samePose(c,piece))
+            .slice(0,6);
+          for(const option of options){
+            const stacks=[...others,option];
+            if(!validateLayout(stacks,this.trailer).ok)continue;
+            const key=stateKey(stacks);if(globalSeen.has(key))continue;globalSeen.add(key);
+            next.push({stacks,moves:[...state.moves,{type:'move',id:piece.id,from:{x:piece.x,y:piece.y,w:piece.w,l:piece.l},to:{x:option.x,y:option.y,w:option.w,l:option.l}}]});
+          }
+          if(isFourWay(piece)&&piece.canRotate!==false&&Math.abs(piece.w-piece.l)>EPS){
+            const rotated={...piece,w:piece.l,l:piece.w,rotated:!piece.rotated};
+            for(const option of this.placementOptions(rotated,others,12).filter(c=>!samePose(c,piece)).slice(0,4)){
+              const stacks=[...others,option];if(!validateLayout(stacks,this.trailer).ok)continue;
+              const key=stateKey(stacks);if(globalSeen.has(key))continue;globalSeen.add(key);
+              next.push({stacks,moves:[...state.moves,{type:'rotate-move',id:piece.id,to:{x:option.x,y:option.y,w:option.w,l:option.l}}]});
+            }
+          }
+        }
+        // Intercambios virtuales entre piezas: se validan como una sola secuencia.
+        for(let i=0;i<Math.min(8,movable.length);i++)for(let j=i+1;j<Math.min(8,movable.length);j++){
+          if(!this.hasTime())break;
+          const a=movable[i],b=movable[j],others=state.stacks.filter(s=>s.id!==a.id&&s.id!==b.id);
+          const posesA=this.orientations(a).map(x=>({...x,x:b.x,y:b.y}));
+          const posesB=this.orientations(b).map(x=>({...x,x:a.x,y:a.y}));
+          for(const na of posesA)for(const nb of posesB){
+            if(!Geometry.valid(na,others,this.trailer)||!Geometry.valid(nb,[...others,na],this.trailer))continue;
+            const stacks=[...others,na,nb],key=stateKey(stacks);if(globalSeen.has(key))continue;globalSeen.add(key);
+            next.push({stacks,moves:[...state.moves,{type:'swap',ids:[a.id,b.id]}]});
+          }
+        }
+      }
+      const ranked=[];
+      for(const state of next){
+        const rescued=tryPending(state.stacks);
+        if(rescued){
+          const ev=evaluate(rescued.stacks);
+          if(ev.pallets>baselinePallets||ev.missing.length<pending.length){
+            candidates.push({name:`Simulación de movimientos · ${state.moves.length} pasos`,family:'Simulación',stacks:rescued.stacks,unplaced:ev.missing,simulatedMoves:state.moves});
+            if(!ev.missing.length)return candidates;
+          }
+        }
+        ranked.push({state,rank:evaluate(state.stacks).rank});
+      }
+      ranked.sort((a,b)=>b.rank-a.rank);
+      beam=[];const localSeen=new Set();
+      for(const item of ranked){const key=stateKey(item.state.stacks);if(localSeen.has(key))continue;localSeen.add(key);beam.push(item.state);if(beam.length>=beamWidth)break;}
+      if(!beam.length)break;
+    }
+    return candidates;
+  }
+
   compactPendingRescue(placed,unplaced,originals){
     // Paso final: compactar primero y volver a probar todas las pendientes en
     // los huecos reales antes de recurrir a reconstrucciones grandes.
@@ -865,7 +1056,7 @@ class LoadEngine {
     // v5.12: toda solución debe estabilizarse antes de ser evaluada. Primero
     // elimina huecos verticales y después vuelve a insertar las pendientes.
     if(!candidate||!Array.isArray(candidate.stacks))return null;
-    let stacks=this.gravityCompact(candidate.stacks);
+    let stacks=this.automaticCompact(candidate.stacks,"deep");
     if(!validateLayout(stacks,this.trailer).ok)return null;
     const ids=new Set(stacks.map(s=>s.id));
     let missing=originals.filter(s=>!ids.has(s.id));
@@ -960,6 +1151,26 @@ class LoadEngine {
       }
     }
 
+    // Simulación de movimientos: ensaya secuencias de traslados, giros e
+    // intercambios sobre copias invisibles de las mejores cargas parciales.
+    // Solo agrega una candidata cuando la secuencia completa mejora el resultado.
+    if(this.hasTime()){
+      const simulationSeeds=solutions.map(s=>{
+        const ids=new Set((s.stacks||[]).map(x=>x.id));
+        const missing=input.filter(x=>!ids.has(x.id));
+        const pallets=(s.stacks||[]).reduce((sum,x)=>sum+(Number(x.qty)||1),0);
+        return {s,missing,pallets};
+      }).filter(x=>x.missing.length>0&&x.missing.length<=4)
+        .sort((a,b)=>b.pallets-a.pallets||b.s.stacks.length-a.s.stacks.length)
+        .slice(0,3);
+      for(const seed of simulationSeeds){
+        if(!this.hasTime())break;
+        const simulated=this.simulateMovementSequences(seed.s.stacks,seed.missing,input,{maxDepth:3,beamWidth:24});
+        for(const candidate of simulated)solutions.push(candidate);
+        if(simulated.some(x=>!(x.unplaced||[]).length))break;
+      }
+    }
+
     // Antes de reconstrucciones generales, intenta rescatar específicamente las últimas 1–2 pilas
     // desde la mejor carga parcial disponible. La solución anterior permanece entre los candidatos.
     if(this.hasTime()){
@@ -1022,19 +1233,14 @@ class LoadEngine {
       s.unplacedPallets=s.unplaced.reduce((sum,x)=>sum+(Number(x.qty)||1),0);
       valid.push(s);
     }
-    valid.sort((a,b)=>
-      b.loadedPallets-a.loadedPallets ||
-      b.loadedStacks-a.loadedStacks ||
-      a.score-b.score ||
-      ((String(b.name).includes('Patrón aprendido')?1:0)-(String(a.name).includes('Patrón aprendido')?1:0))
-    );
-    if(valid.length){
-      const selected=selectDiverseSolutions(valid,3,this.trailer);
-      const learned=valid.find(s=>String(s.name).includes('Patrón aprendido'));
+    const rankedValid=rankSolutionsIntelligently(valid,this.trailer);
+    if(rankedValid.length){
+      const selected=selectDiverseSolutions(rankedValid,3,this.trailer);
+      const learned=rankedValid.find(s=>String(s.name).includes('Patrón aprendido'));
       if(learned&&!selected.some(s=>s===learned||String(s.name).includes('Patrón aprendido'))){
         if(selected.length>=3)selected[selected.length-1]=learned;else selected.push(learned);
       }
-      selected.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
+      selected.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||(b.rankScore||0)-(a.rankScore||0)||a.score-b.score);
       return {ok:true,solutions:selected,timedOut:this.timedOut};
     }
     return {ok:false,timedOut:this.timedOut,message:'No se pudo colocar ninguna pila adicional de forma válida. Revisa las pilas bloqueadas y las dimensiones.'};
@@ -1092,14 +1298,15 @@ function runPortfolioSearch(input,trailer,{totalTimeMs=21000,patterns=[],strateg
     if(bestBaseline && (sol.loadedPallets<bestBaseline.loadedPallets || (sol.loadedPallets===bestBaseline.loadedPallets&&sol.loadedStacks<bestBaseline.loadedStacks)))continue;
     valid.push(sol);
   }
-  valid.sort((a,b)=>b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score);
-  return {ok:valid.length>0,solutions:selectDiverseSolutions(valid,3,trailer),attemptedProfiles:profiles.length,attemptedRuns:attempt+1,elapsedMs:Date.now()-started};
+  const ranked=rankSolutionsIntelligently(valid,trailer);
+  return {ok:ranked.length>0,solutions:selectDiverseSolutions(ranked,3,trailer),attemptedProfiles:profiles.length,attemptedRuns:attempt+1,elapsedMs:Date.now()-started};
 }
 
 // ===== app.js =====
 
 
 const SCALE = 1.05;
+const LEGACY_TRAILER_PANEL_KEY="lm_trailer_panel_open"; // compatibilidad v5.19
 const PRESETS = {
   "96x628":[96,628], "96x300":[96,300], "96x330":[96,330],
   "95x574":[95,574], "96x574":[96,574], "95x628":[95,628], "98x628":[98,628]
@@ -1191,6 +1398,28 @@ function normalizeLibraryItem(raw={}){
     parts.push(asciiBytes(xref));return new Blob([concatBytes(parts)],{type:'application/pdf'});
   }
 
+  function canvasesToPdfBlob(canvases){
+    const list=(canvases||[]).filter(Boolean);if(!list.length)throw new Error("No hay reportes seleccionados");
+    const pageW=595,pageH=842,margin=18,maxW=pageW-margin*2,maxH=pageH-margin*2;
+    const objects=[],pageIds=[],imageIds=[],contentIds=[];let nextId=3;
+    list.forEach(()=>{pageIds.push(nextId++);imageIds.push(nextId++);contentIds.push(nextId++);});
+    objects[1]=asciiBytes('<< /Type /Catalog /Pages 2 0 R >>');
+    objects[2]=asciiBytes(`<< /Type /Pages /Kids [${pageIds.map(id=>`${id} 0 R`).join(' ')}] /Count ${list.length} >>`);
+    list.forEach((canvas,i)=>{
+      const jpeg=dataUrlBytes(canvas.toDataURL('image/jpeg',0.9));
+      const ratio=Math.min(maxW/canvas.width,maxH/canvas.height),drawW=canvas.width*ratio,drawH=canvas.height*ratio;
+      const x=(pageW-drawW)/2,y=(pageH-drawH)/2,content=`q ${drawW.toFixed(2)} 0 0 ${drawH.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${i} Do Q`;
+      objects[pageIds[i]]=asciiBytes(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im${i} ${imageIds[i]} 0 R >> >> /Contents ${contentIds[i]} 0 R >>`);
+      objects[imageIds[i]]=concatBytes([asciiBytes(`<< /Type /XObject /Subtype /Image /Width ${canvas.width} /Height ${canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`),jpeg,asciiBytes('\nendstream')]);
+      objects[contentIds[i]]=asciiBytes(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+    });
+    const parts=[asciiBytes('%PDF-1.4\n%LM20\n')],offsets=[0];let length=parts[0].length;
+    for(let i=1;i<nextId;i++){offsets[i]=length;const part=concatBytes([asciiBytes(`${i} 0 obj\n`),objects[i],asciiBytes('\nendobj\n')]);parts.push(part);length+=part.length;}
+    const xrefOffset=length;let xref=`xref\n0 ${nextId}\n0000000000 65535 f \n`;
+    for(let i=1;i<nextId;i++)xref+=String(offsets[i]).padStart(10,'0')+' 00000 n \n';
+    xref+=`trailer\n<< /Size ${nextId} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;parts.push(asciiBytes(xref));return new Blob([concatBytes(parts)],{type:'application/pdf'});
+  }
+
   const PATTERN_STORAGE_KEY = "loadmaster-visual-patterns-v1";
 
   class PatternMemory {
@@ -1249,19 +1478,67 @@ function normalizeLibraryItem(raw={}){
     get(id){return this.saved.find(x=>x.id===id)||this.recent.find(x=>x.id===id);}
   }
 
-  const STRATEGY_STORAGE_KEY = "loadmaster-strategies-v1";
+  const STRATEGY_STORAGE_KEY = "loadmaster-strategies-v2-adaptive";
+  const LEGACY_STRATEGY_STORAGE_KEY = "loadmaster-strategies-v1";
+  function cargoProfile(stacks,trailer){
+    const counts=new Map();
+    for(const s of stacks||[]){const a=Math.min(Number(s.w)||0,Number(s.l)||0),b=Math.max(Number(s.w)||0,Number(s.l)||0),key=`${a}x${b}:${s.type||''}`;counts.set(key,(counts.get(key)||0)+1);}
+    return `${Number(trailer?.width)||0}x${Number(trailer?.length)||0}|${[...counts.entries()].sort().map(([k,n])=>`${k}=${n}`).join(',')}`;
+  }
+  function strategyConfidence(item){
+    const successes=Number(item.successes)||0,failures=Number(item.failures)||0;
+    return (successes+1)/(successes+failures+2);
+  }
   class StrategyMemory {
-    constructor(){this.items=this.load();}
-    load(){try{const v=JSON.parse(localStorage.getItem(STRATEGY_STORAGE_KEY)||"[]");return Array.isArray(v)?v:[];}catch{return [];}}
-    persist(){localStorage.setItem(STRATEGY_STORAGE_KEY,JSON.stringify(this.items.slice(-80)));}
-    learn(stacks,trailer,source="auto"){
-      if(!Array.isArray(stacks)||stacks.length<2)return;
-      const sequence=[...stacks].sort((a,b)=>a.y-b.y||a.x-b.x).map(s=>({w:s.w,l:s.l,type:s.type||"",rotated:!!s.rotated}));
-      const signature=sequence.map(s=>`${s.w}x${s.l}:${s.type}`).join("|");
-      const existing=this.items.find(x=>x.signature===signature&&Math.abs(Number(x.trailerWidth)-Number(trailer.width))<EPS);
-      if(existing){existing.hits=(existing.hits||1)+1;existing.updatedAt=new Date().toISOString();existing.source=source;}
-      else this.items.push({id:uid(),signature,sequence,trailerWidth:trailer.width,hits:1,source,updatedAt:new Date().toISOString()});
-      this.items.sort((a,b)=>(a.hits||1)-(b.hits||1));this.persist();
+    constructor(){this.allItems=this.load();this.activeProfile=null;this.items=[];}
+    load(){
+      try{
+        let v=JSON.parse(localStorage.getItem(STRATEGY_STORAGE_KEY)||"null");
+        if(!Array.isArray(v)){
+          const legacy=JSON.parse(localStorage.getItem(LEGACY_STRATEGY_STORAGE_KEY)||"[]");
+          v=Array.isArray(legacy)?legacy.map(x=>({...x,profile:'legacy',successes:Math.max(1,Number(x.hits)||1),failures:0,status:(Number(x.hits)||1)>=3?'trusted':'candidate'})):[];
+        }
+        return v.filter(x=>x&&Array.isArray(x.sequence)).map(x=>({...x,successes:Number(x.successes)||0,failures:Number(x.failures)||0,status:x.status||'candidate'}));
+      }catch{return [];}
+    }
+    persist(){
+      this.allItems=this.allItems.slice(-160);
+      try{localStorage.setItem(STRATEGY_STORAGE_KEY,JSON.stringify(this.allItems));}catch{}
+    }
+    prepare(stacks,trailer){
+      this.activeProfile=cargoProfile(stacks,trailer);
+      const width=Number(trailer.width)||0;
+      this.items=this.allItems.filter(x=>x.status==='trusted'&&(x.profile===this.activeProfile||x.profile==='legacy')&&Math.abs(Number(x.trailerWidth)-width)<EPS).sort((a,b)=>strategyConfidence(a)-strategyConfidence(b));
+      return this.items;
+    }
+    makeSequence(stacks){return [...stacks].sort((a,b)=>a.y-b.y||a.x-b.x).map(s=>({w:s.w,l:s.l,type:s.type||"",rotated:!!s.rotated}));}
+    learn(stacks,trailer,source="auto",context={}){
+      if(!Array.isArray(stacks)||stacks.length<2)return null;
+      const sequence=this.makeSequence(stacks),signature=sequence.map(s=>`${s.w}x${s.l}:${s.type}:${s.rotated?1:0}`).join("|"),profile=context.profile||this.activeProfile||cargoProfile(context.input||stacks,trailer);
+      let existing=this.allItems.find(x=>x.signature===signature&&x.profile===profile&&Math.abs(Number(x.trailerWidth)-Number(trailer.width))<EPS);
+      if(!existing){existing={id:uid(),signature,sequence,profile,trailerWidth:trailer.width,successes:0,failures:0,status:'candidate',source,createdAt:new Date().toISOString()};this.allItems.push(existing);}
+      const success=context.success!==false;
+      if(success)existing.successes=(existing.successes||0)+1;else existing.failures=(existing.failures||0)+1;
+      existing.hits=(existing.successes||0);existing.source=source;existing.updatedAt=new Date().toISOString();existing.lastImprovement=Number(context.improvement)||0;
+      const confidence=strategyConfidence(existing),trials=(existing.successes||0)+(existing.failures||0);
+      existing.status=trials>=3&&confidence>=0.7?'trusted':'candidate';
+      if(trials>=6&&confidence<0.4)existing.status='rejected';
+      this.persist();return existing;
+    }
+    recordOutcome(input,trailer,result,source="optimización",baseline={}){
+      const profile=cargoProfile(input,trailer),loaded=(result.stacks||[]).reduce((n,s)=>n+(Number(s.qty)||1),0),left=(result.unplaced||[]).reduce((n,s)=>n+(Number(s.qty)||1),0),used=Number(result.used)||Geometry.usedLength(result.stacks||[]);
+      const baselineLoaded=Number(baseline.loaded)||0,baselineLeft=Number(baseline.left)||0,baselineUsed=Number(baseline.used)||Infinity;
+      const improvement=(loaded-baselineLoaded)*1000+(baselineLeft-left)*500+(Number.isFinite(baselineUsed)?baselineUsed-used:0);
+      const success=left===0||improvement>0;
+      const learned=this.learn(result.stacks,trailer,source,{profile,input,success,improvement});
+      for(const item of this.allItems){if(item===learned||item.status==='rejected'||item.profile!==profile)continue;if(Math.abs(Number(item.trailerWidth)-Number(trailer.width))>=EPS)continue;item.failures=(item.failures||0)+(success?0:1);const trials=(item.successes||0)+(item.failures||0);item.status=trials>=3&&strategyConfidence(item)>=0.7?'trusted':(trials>=6&&strategyConfidence(item)<0.4?'rejected':'candidate');}
+      this.persist();this.prepare(input,trailer);return learned;
+    }
+    learnManual(beforeStacks,afterStacks,trailer){
+      if(!Array.isArray(beforeStacks)||!Array.isArray(afterStacks)||beforeStacks.length!==afterStacks.length)return null;
+      const before=calculateLoadStatistics(beforeStacks,trailer),after=calculateLoadStatistics(afterStacks,trailer),improvement=(before.usedLength-after.usedLength)+(before.deadArea-after.deadArea)/Math.max(1,Number(trailer.width)||1);
+      if(improvement<=0.25)return null;
+      return this.learn(afterStacks,trailer,"corrección manual",{profile:cargoProfile(beforeStacks,trailer),input:beforeStacks,success:true,improvement});
     }
   }
 
@@ -1327,10 +1604,29 @@ function normalizeLibraryItem(raw={}){
     return {...stats,score,label,tone,completion,loaded,left,reasons};
   }
 
+
+  function fileToDataUrl(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||""));reader.onerror=()=>reject(reader.error||new Error("No se pudo leer la imagen"));reader.readAsDataURL(file);});}
+  async function resizeImageDataUrl(file,maxSide=1600){
+    const source=await fileToDataUrl(file),img=new Image();
+    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error("Imagen no válida"));img.src=source;});
+    const ratio=Math.min(1,maxSide/Math.max(img.naturalWidth||1,img.naturalHeight||1)),w=Math.max(1,Math.round(img.naturalWidth*ratio)),h=Math.max(1,Math.round(img.naturalHeight*ratio));
+    const canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d");ctx.drawImage(img,0,0,w,h);return canvas.toDataURL("image/jpeg",.86);
+  }
+  function extractResponseText(data){
+    if(typeof data?.output_text==="string")return data.output_text;
+    const parts=[];for(const out of data?.output||[]){for(const c of out?.content||[]){if(typeof c?.text==="string")parts.push(c.text);if(typeof c?.output_text==="string")parts.push(c.output_text);}}
+    return parts.join("\n");
+  }
+  function parsePhotoLoadJson(text){
+    const cleaned=String(text||"").trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"");
+    let parsed;try{parsed=JSON.parse(cleaned);}catch{const start=cleaned.indexOf("{"),end=cleaned.lastIndexOf("}");if(start<0||end<=start)throw new Error("La IA no devolvió datos estructurados");parsed=JSON.parse(cleaned.slice(start,end+1));}
+    const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed.items)?parsed.items:[];
+    return rows.map((raw,i)=>{const length=Number(raw.length??raw.largo??raw.l??0),width=Number(raw.width??raw.ancho??raw.w??0),quantity=Math.max(1,Math.round(Number(raw.quantity??raw.cantidad??raw.qty??1)||1)),maxHeight=Math.max(1,Math.round(Number(raw.maxHeight??raw.max_por_pila??raw.altura??raw.stackMax??quantity)||quantity));let type=String(raw.type??raw.tipo??"4-way").toLowerCase();type=type.includes("2")?"2-way":"4-way";return {id:uid(),name:String(raw.name??raw.nombre??`${length||"?"}×${width||"?"}`).trim()||`Fila ${i+1}`,quantity,length,width,maxHeight,type,canRotate:raw.canRotate!==false&&raw.giro!==false&&type==="4-way",category:String(raw.category??raw.categoria??"Otra"),notes:String(raw.notes??raw.notas??""),confidence:Math.max(0,Math.min(1,Number(raw.confidence??raw.confianza??.5)||.5))};}).filter(x=>x.length>0&&x.width>0&&x.quantity>0);
+  }
   class App {
     constructor(){
-      this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null;
-      this.bind(); this.syncTrailerInputs(); this.restoreTrailerPanelState(); this.render();
+      this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[];
+      this.bind(); this.syncTrailerInputs(); this.restoreAccordionState(); this.render();
       if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
     }
     get state(){return this.store.state;}
@@ -1342,12 +1638,15 @@ function normalizeLibraryItem(raw={}){
       window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();this.installPrompt=e;$("installBtn").hidden=false;});
       $("installBtn").onclick=async()=>{if(!this.installPrompt)return;this.installPrompt.prompt();await this.installPrompt.userChoice;this.installPrompt=null;$("installBtn").hidden=true;};
       $("trailerPreset").onchange=e=>{const v=PRESETS[e.target.value];if(v){$("trailerWidth").value=v[0];$("trailerLength").value=v[1];$("trailerAutofillStatus").textContent=`✓ Tráiler autocompletado: ${v[1]} largo × ${v[0]} ancho`;this.updateTrailerSummary(v[0],v[1]);}};
-      $("trailerSettings").addEventListener("toggle",()=>localStorage.setItem("lm_trailer_panel_open",$("trailerSettings").open?"1":"0"));
+      this.bindAccordion();
       $("applyTrailer").onclick=()=>{this.store.remember();this.state.trailer={width:+$("trailerWidth").value||96,length:+$("trailerLength").value||628};this.updateTrailerSummary();this.render();};
       $("librarySelect").onchange=()=>this.loadLibrarySelection();
       $("saveLibrary").onclick=()=>this.saveLibraryItem();
       $("newCatalogItem").onclick=()=>this.openCatalogEditor();
       $("catalogSearch").oninput=()=>this.renderLibrary();
+      $("editCatalogSelected").onclick=()=>{const id=$("catalogManageSelect").value;if(!id)return this.toast("Selecciona un pallet guardado");this.openCatalogEditor(id);};
+      $("duplicateCatalogSelected").onclick=()=>{const id=$("catalogManageSelect").value;if(!id)return this.toast("Selecciona un pallet guardado");this.duplicateCatalogItem(id);};
+      $("deleteCatalogSelected").onclick=()=>{const id=$("catalogManageSelect").value;if(!id)return this.toast("Selecciona un pallet guardado");this.deleteCatalogItem(id);};
       $("exportCatalog").onclick=()=>this.exportCatalog();
       $("importCatalog").onclick=()=>$("catalogImportInput").click();
       $("catalogImportInput").onchange=e=>this.importCatalog(e);
@@ -1358,23 +1657,84 @@ function normalizeLibraryItem(raw={}){
       $("duplicateBtn").onclick=()=>this.duplicateSelected();
       $("deleteBtn").onclick=()=>this.deleteSelected(); $("floatDeleteBtn").onclick=()=>this.deleteSelected();
       $("undoBtn").onclick=()=>this.undo(); $("redoBtn").onclick=()=>this.redo();
-      $("compactBtn").onclick=()=>this.compact(); $("optimizeBtn").onclick=()=>this.optimize();
+      $("compactBtn").onclick=()=>this.compact(); $("optimizeBtn").onclick=()=>this.optimize(); $("retryOptimizeBtn").onclick=()=>this.optimize();
       $("clearBtn").onclick=()=>{if(!this.state.stacks.length)return;this.store.remember();this.state.stacks=[];this.state.selectedId=null;this.render();};
       $("demoBtn").onclick=()=>this.demo();
       $("saveLoadBtn").onclick=()=>this.saveFile(); $("openLoadBtn").onclick=()=>$("fileInput").click();
       $("saveImageBtn").onclick=()=>this.saveImage(); $("saveReportBtn").onclick=()=>this.saveProfessionalPdf(); $("shareReportBtn").onclick=()=>this.shareProfessionalReport();
       $("fileInput").onchange=e=>this.openFile(e); $("printBtn").onclick=()=>window.print();
-      $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;$("retryPendingBtn").onclick=()=>this.retryPending();$("clearPendingBtn").onclick=()=>this.clearPending();
+      $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;$("stopProgressiveBtn").onclick=()=>this.stopProgressiveOptimization();$("applyProgressiveBtn").onclick=()=>this.applyProgressiveImprovement();$("ignoreProgressiveBtn").onclick=()=>this.ignoreProgressiveImprovement();$("compareProgressiveBtn").onclick=()=>this.compareProgressiveImprovement();$("retryPendingBtn").onclick=()=>this.retryPending();$("clearPendingBtn").onclick=()=>this.clearPending();
+      $("scanCameraBtn").onclick=()=>this.openPhotoPicker("camera"); $("scanGalleryBtn").onclick=()=>this.openPhotoPicker("gallery");
+      $("scanCameraInput").onchange=e=>this.loadPhotoForReading(e); $("scanGalleryInput").onchange=e=>this.loadPhotoForReading(e);
+      $("closePhotoReader").onclick=()=>$("photoReaderDialog").close(); $("cancelPhotoImportBtn").onclick=()=>$("photoReaderDialog").close();
+      $("analyzePhotoBtn").onclick=()=>this.analyzeLoadPhoto(); $("addPhotoRowBtn").onclick=()=>{this.photoReaderItems.push({id:uid(),name:"Pallet",quantity:1,length:40,width:48,maxHeight:13,type:"4-way",canRotate:true,category:"Otra",notes:"",confidence:1});this.renderPhotoReview();};
+      $("confirmPhotoImportBtn").onclick=()=>this.confirmPhotoImport();
       $("referenceImageInput").onchange=e=>this.loadReferenceImage(e);
       $("learnPatternBtn").onclick=()=>this.learnCurrentPattern();
       $("cancelPatternEdit").onclick=()=>this.cancelPatternEdit(); $("clearInternalLearning").onclick=()=>this.clearInternalLearning(); $("saveHistoryBtn").onclick=()=>this.saveCurrentToHistory();
+      ["historySearch","historyDateFrom","historyDateTo","historyStatusFilter","historySort","historyFavoritesOnly"].forEach(id=>{const el=$(id);if(el)el.addEventListener(id==="historyFavoritesOnly"?"change":"input",()=>this.renderVisualHistory());});
+      $("compareHistoryBtn").onclick=()=>this.compareSelectedHistory();$("exportHistoryPdfBtn").onclick=()=>this.exportSelectedHistoryPdf();$("exportHistoryCsvBtn").onclick=()=>this.exportSelectedHistoryCsv();$("deleteHistorySelectedBtn").onclick=()=>this.deleteSelectedHistory();$("closeComparisonBtn").onclick=()=>{$("comparisonPanel").hidden=true;};
       $("analyzePatternBtn").onclick=()=>this.analyzeCurrentRows();
       $("trailer").onclick=e=>{if(e.target===$("trailer")||e.target.classList.contains("freeZone")){this.state.selectedId=null;this.render();}};
+      $("manualModeBtn").onclick=()=>this.setManualEditMode(true);
+      $("finishManualBtn").onclick=()=>this.setManualEditMode(false);
     }
 
-    restoreTrailerPanelState(){const panel=$("trailerSettings");if(!panel)return;panel.open=localStorage.getItem("lm_trailer_panel_open")==="1";this.updateTrailerSummary();}
+    accordionPanels(){return [$("trailerSettings"),$("catalogPanel"),$("historyPanel")].filter(Boolean);}
+    bindAccordion(){
+      this.accordionPanels().forEach(panel=>panel.addEventListener("toggle",()=>{
+        if(this.syncingAccordion)return;
+        if(panel.open){
+          this.syncingAccordion=true;
+          this.accordionPanels().forEach(other=>{if(other!==panel)other.open=false;});
+          this.syncingAccordion=false;
+          localStorage.setItem("lm_sidebar_accordion_open",panel.id);
+        }else if(localStorage.getItem("lm_sidebar_accordion_open")===panel.id){
+          localStorage.removeItem("lm_sidebar_accordion_open");
+        }
+      }));
+    }
+    restoreAccordionState(){
+      const id=localStorage.getItem("lm_sidebar_accordion_open");
+      this.syncingAccordion=true;
+      this.accordionPanels().forEach(panel=>panel.open=!!id&&panel.id===id);
+      this.syncingAccordion=false;
+      this.updateTrailerSummary();this.updateCatalogSummary();this.updateHistorySummary();
+    }
     updateTrailerSummary(width=this.state.trailer.width,length=this.state.trailer.length){const el=$("trailerSummary");if(el)el.textContent=`${Number(width)||0} × ${Number(length)||0} pulg.`;}
+    updateCatalogSummary(){const el=$("catalogSummary");if(el){const n=this.state.library.length;el.textContent=`${n} medida${n===1?"":"s"} guardada${n===1?"":"s"}`;}}
+    updateHistorySummary(){const el=$("historySummary");if(el){const saved=this.visualHistory.saved.length,recent=this.visualHistory.recent.length;el.textContent=(saved||recent)?`${saved} guardada${saved===1?"":"s"} · ${recent} reciente${recent===1?"":"s"}`:"Sin registros";}}
 
+
+    openPhotoPicker(source="gallery"){
+      if(!navigator.onLine)return this.toast("La lectura desde foto requiere Internet. Agrega la carga manualmente.");
+      const input=source==="camera"?$("scanCameraInput"):$("scanGalleryInput");input.value="";input.click();
+    }
+    async loadPhotoForReading(e){
+      const file=e.target.files?.[0];if(!file)return;
+      if(!navigator.onLine){e.target.value="";return this.toast("Sin Internet: agrega la carga manualmente");}
+      if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>15*1024*1024){e.target.value="";return this.toast("Usa JPG, PNG o WebP de hasta 15 MB");}
+      try{this.photoReaderFile=file;this.photoReaderDataUrl=await resizeImageDataUrl(file);this.photoReaderItems=[];const preview=$("photoPreview");preview.innerHTML="";const img=document.createElement("img");img.src=this.photoReaderDataUrl;img.alt="Orden seleccionada";preview.appendChild(img);$("photoReaderStatus").textContent=`Imagen lista: ${file.name}`;$("photoReaderHelp").textContent="Configura la clave de API para analizarla. Los datos no se agregan hasta que los confirmes.";$("photoReviewSection").hidden=true;$("analyzePhotoBtn").disabled=false;$("visionApiKey").value=sessionStorage.getItem("lm_vision_api_key")||"";$("visionModel").value=sessionStorage.getItem("lm_vision_model")||"gpt-5.6";$("photoReaderDialog").showModal();}catch(err){this.toast(err.message||"No se pudo abrir la imagen");}
+    }
+    async analyzeLoadPhoto(){
+      if(!navigator.onLine)return this.toast("La lectura desde foto requiere Internet");
+      if(!this.photoReaderDataUrl)return this.toast("Selecciona una fotografía");
+      const key=$("visionApiKey").value.trim(),model=$("visionModel").value.trim()||"gpt-5.6";if(!key)return this.toast("Escribe una clave de API para esta sesión");
+      sessionStorage.setItem("lm_vision_api_key",key);sessionStorage.setItem("lm_vision_model",model);const btn=$("analyzePhotoBtn");btn.disabled=true;$("photoReaderStatus").textContent="Analizando la orden…";$("photoReaderHelp").textContent="Busca cantidades, dimensiones, altura máxima y tipo de acceso.";
+      const prompt=`Analiza esta fotografía de una orden de pallets. Extrae todas las filas de carga. Devuelve SOLO JSON válido con esta forma exacta: {"items":[{"name":"nombre o código","quantity":1,"length":42,"width":42,"maxHeight":13,"type":"2-way o 4-way","canRotate":true,"category":"Otra","notes":"restricciones relevantes","confidence":0.95}]}. Usa pulgadas. quantity es la cantidad total de pallets; maxHeight es el máximo de pallets por pila. Si la orden dice 2-way, canRotate debe ser false salvo indicación explícita. No inventes valores ilegibles: usa confidence baja y explica la duda en notes. Omite filas sin dimensiones utilizables.`;
+      try{
+        const response=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model,input:[{role:"user",content:[{type:"input_text",text:prompt},{type:"input_image",image_url:this.photoReaderDataUrl,detail:"high"}]}],max_output_tokens:2200})});
+        const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data?.error?.message||`Error del servicio (${response.status})`);const text=extractResponseText(data);this.photoReaderItems=parsePhotoLoadJson(text);if(!this.photoReaderItems.length)throw new Error("No se detectaron filas con medidas completas");this.renderPhotoReview();$("photoReviewSection").hidden=false;$("photoReaderStatus").textContent=`${this.photoReaderItems.length} fila${this.photoReaderItems.length===1?"":"s"} detectada${this.photoReaderItems.length===1?"":"s"}`;$("photoReaderHelp").textContent="Revisa los datos marcados con baja confianza antes de agregarlos.";
+      }catch(err){$("photoReaderStatus").textContent="No se pudo analizar la fotografía";$("photoReaderHelp").textContent=err.message||"Comprueba la conexión y la clave de API.";this.toast(err.message||"Error al leer la fotografía");}finally{btn.disabled=false;}
+    }
+    renderPhotoReview(){
+      const body=$("photoReviewBody");body.innerHTML="";this.photoReaderItems.forEach((item,index)=>{const tr=document.createElement("tr");if(item.confidence<.65)tr.classList.add("lowConfidence");tr.innerHTML=`<td><input data-field="name" type="text"></td><td><input data-field="quantity" min="1" type="number"></td><td><input data-field="length" min="1" type="number"></td><td><input data-field="width" min="1" type="number"></td><td><input data-field="maxHeight" min="1" type="number"></td><td><select data-field="type"><option value="4-way">4-way</option><option value="2-way">2-way</option></select></td><td><input data-field="canRotate" type="checkbox"></td><td><span class="confidenceBadge"></span></td><td><button data-remove type="button">×</button></td>`;for(const input of tr.querySelectorAll("[data-field]")){const field=input.dataset.field;if(input.type==="checkbox")input.checked=!!item[field];else input.value=item[field]??"";input.oninput=()=>{item[field]=input.type==="checkbox"?input.checked:(input.type==="number"?Number(input.value):input.value);if(field==="type"&&input.value==="2-way"){item.canRotate=false;tr.querySelector('[data-field="canRotate"]').checked=false;}};}tr.querySelector(".confidenceBadge").textContent=`${Math.round(item.confidence*100)}%`;tr.querySelector("[data-remove]").onclick=()=>{this.photoReaderItems.splice(index,1);this.renderPhotoReview();};body.appendChild(tr);});
+    }
+    confirmPhotoImport(){
+      const items=this.photoReaderItems.map(x=>({...x,quantity:Math.max(1,Math.round(Number(x.quantity)||0)),length:Number(x.length)||0,width:Number(x.width)||0,maxHeight:Math.max(1,Math.round(Number(x.maxHeight)||0))})).filter(x=>x.length>0&&x.width>0&&x.quantity>0&&x.maxHeight>0);if(!items.length)return this.toast("No hay filas válidas para agregar");
+      this.store.remember();let stacksAdded=0,palletsAdded=0;for(const item of items){const base={name:item.name||`${item.length}×${item.width}`,w:item.width,l:item.length,type:item.type==="2-way"?"2-way":"4-way",category:item.category||"Otra",canRotate:item.type!=="2-way"&&item.canRotate!==false,locked:false,rotated:false};this.splitQty(item.quantity,item.maxHeight).forEach((n,i)=>{this.state.stacks.push({...base,id:uid(),qty:n,x:Math.max(0,Math.min(this.state.trailer.width-item.width,4+(i%2)*(item.width+2))),y:Math.max(0,Geometry.usedLength(this.state.stacks)+2)});stacksAdded++;palletsAdded+=n;});}
+      this.state.selectedId=null;this.render();$("photoReaderDialog").close();this.toast(`${palletsAdded} pallets agregados en ${stacksAdded} pilas. Revisa y optimiza.`);
+    }
     loadReferenceImage(e){
       const file=e.target.files&&e.target.files[0];
       if(!file)return;
@@ -1430,11 +1790,11 @@ function normalizeLibraryItem(raw={}){
       const untouched=available.filter((_,i)=>!used.has(i));this.store.remember();this.state.stacks=[...placed,...untouched];this.render();this.toast(`Patrón aplicado a ${placed.length} pila${placed.length===1?"":"s"}; optimiza para completar`);
     }
     clearInternalLearning(){
-      const patternCount=this.patternMemory.patterns.filter(p=>p&&p.autoComplete).length,strategyCount=this.strategyMemory.items.length,count=patternCount+strategyCount;
+      const patternCount=this.patternMemory.patterns.filter(p=>p&&p.autoComplete).length,strategyCount=this.strategyMemory.allItems.length,count=patternCount+strategyCount;
       if(!count)return this.toast("No hay aprendizaje interno guardado");
       if(!confirm(`Configuración avanzada: se eliminarán ${patternCount} soluciones aprendidas y ${strategyCount} estrategias internas. Tus patrones e historial manual se conservarán. ¿Continuar?`))return;
       if(!confirm("Última confirmación: esta acción no se puede deshacer. ¿Restablecer el aprendizaje interno?"))return;
-      this.patternMemory.patterns=this.patternMemory.patterns.filter(p=>!p.autoComplete);this.patternMemory.persist();this.strategyMemory.items=[];this.strategyMemory.persist();this.toast("Aprendizaje interno restablecido");
+      this.patternMemory.patterns=this.patternMemory.patterns.filter(p=>!p.autoComplete);this.patternMemory.persist();this.strategyMemory.allItems=[];this.strategyMemory.items=[];this.strategyMemory.persist();this.toast("Aprendizaje interno restablecido");
     }
     deletePattern(id){const pattern=this.patternMemory.get(id);if(!pattern)return;if(!confirm(`¿Eliminar el patrón “${pattern.name}”?`))return;this.patternMemory.remove(id);if(this.editingPatternId===id)this.cancelPatternEdit();this.renderPatterns();this.toast("Patrón eliminado");}
     renderPatterns(){
@@ -1482,7 +1842,7 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.19",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.30",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
@@ -1532,9 +1892,30 @@ function normalizeLibraryItem(raw={}){
     renameHistoryEntry(id){const entry=this.visualHistory.saved.find(x=>x.id===id);if(!entry)return;const name=prompt("Nuevo nombre para la carga:",entry.name||"");if(name===null)return;const clean=name.trim();if(!clean)return this.toast("Escribe un nombre válido");this.visualHistory.updateSaved(id,{name:clean});this.renderVisualHistory();}
     toggleHistoryFavorite(id){const entry=this.visualHistory.saved.find(x=>x.id===id);if(!entry)return;this.visualHistory.updateSaved(id,{favorite:!entry.favorite});this.renderVisualHistory();}
     deleteHistoryEntry(id,isRecent=false){const entry=this.visualHistory.get(id);if(!entry)return;if(!confirm(`¿Eliminar “${entry.name}” del historial?`))return;if(isRecent)this.visualHistory.removeRecent(id);else this.visualHistory.removeSaved(id);this.renderVisualHistory();this.toast("Registro eliminado");}
-    renderVisualHistory(){
-      const renderList=(root,items,isRecent)=>{root.innerHTML="";if(!items.length){root.innerHTML=`<div class="historyEmpty">${isRecent?"Todavía no hay optimizaciones recientes.":"Todavía no has guardado cargas manualmente."}</div>`;return;}const ordered=isRecent?[...items]:[...items].sort((a,b)=>(Number(!!b.favorite)-Number(!!a.favorite))||String(b.updatedAt||b.createdAt).localeCompare(String(a.updatedAt||a.createdAt)));ordered.forEach(entry=>{const item=document.createElement("article");item.className="historyItem";const img=entry.thumbnail?`<img class="historyThumb" alt="Vista previa de la carga">`:`<div class="historyThumb historyEmpty">Sin vista</div>`;const score=Number(entry.stats?.score)||0,loaded=Number(entry.stats?.loaded)||0,left=Number(entry.stats?.left)||0,date=new Date(entry.updatedAt||entry.createdAt).toLocaleString("es-MX");item.innerHTML=`${img}<div class="historyMeta"><strong></strong><small>${date}</small><small>${loaded} pallets dentro${left?` · ${left} pendientes`:" · completa"} · ${score.toFixed(1)}% eficiencia</small><small>${entry.strategy||"Manual"}</small><div class="historyActions"><button data-open type="button">Abrir</button>${isRecent?'<button data-save type="button">Guardar</button>':'<button data-rename type="button">Renombrar</button><button data-favorite type="button"></button>'}<button data-delete type="button">Eliminar</button></div></div>`;if(entry.thumbnail)item.querySelector("img").src=entry.thumbnail;item.querySelector("strong").textContent=`${entry.favorite?"★ ":""}${entry.name||"Carga"}`;item.querySelector("[data-open]").onclick=()=>this.openHistoryEntry(entry.id);item.querySelector("[data-delete]").onclick=()=>this.deleteHistoryEntry(entry.id,isRecent);if(isRecent)item.querySelector("[data-save]").onclick=()=>this.saveRecentAsPermanent(entry.id);else{item.querySelector("[data-rename]").onclick=()=>this.renameHistoryEntry(entry.id);const fav=item.querySelector("[data-favorite]");fav.textContent=entry.favorite?"Quitar favorito":"Favorito";fav.classList.toggle("historyFavorite",!!entry.favorite);fav.onclick=()=>this.toggleHistoryFavorite(entry.id);}root.appendChild(item);});};renderList($("savedHistoryList"),this.visualHistory.saved,false);renderList($("recentHistoryList"),this.visualHistory.recent,true);
+    historyAllEntries(){return [...this.visualHistory.saved,...this.visualHistory.recent];}
+    getSelectedHistoryEntries(){return [...this.selectedHistoryIds].map(id=>this.visualHistory.get(id)).filter(Boolean);}
+    toggleHistorySelection(id,checked){if(checked)this.selectedHistoryIds.add(id);else this.selectedHistoryIds.delete(id);this.updateHistorySelectionToolbar();}
+    updateHistorySelectionToolbar(){for(const id of [...this.selectedHistoryIds])if(!this.visualHistory.get(id))this.selectedHistoryIds.delete(id);const count=this.selectedHistoryIds.size;$('historySelectedCount').textContent=String(count);$('compareHistoryBtn').disabled=count!==2;$('exportHistoryPdfBtn').disabled=count<1;$('exportHistoryCsvBtn').disabled=count<1;$('deleteHistorySelectedBtn').disabled=count<1;}
+    filterAndSortHistory(items,isRecent=false){
+      const q=($('historySearch').value||'').trim().toLowerCase(),from=$('historyDateFrom').value,to=$('historyDateTo').value,status=$('historyStatusFilter').value,onlyFav=$('historyFavoritesOnly').checked,sort=$('historySort').value;
+      let out=[...items].filter(entry=>{const date=new Date(entry.updatedAt||entry.createdAt),dateKey=Number.isNaN(date.getTime())?'':date.toISOString().slice(0,10),left=Number(entry.stats?.left)||0,text=`${entry.name||''} ${entry.strategy||''} ${entry.trailer?.width||''}x${entry.trailer?.length||''}`.toLowerCase();return (!q||text.includes(q))&&(!from||dateKey>=from)&&(!to||dateKey<=to)&&(status==='all'||(status==='complete'?left===0:left>0))&&(!onlyFav||!!entry.favorite);});
+      const num=(e,k)=>Number(e.stats?.[k])||0;
+      out.sort((a,b)=>{if(sort==='efficiency')return num(b,'score')-num(a,'score');if(sort==='pallets')return num(b,'loaded')-num(a,'loaded');if(sort==='time')return (Number(a.optimizationMs)||Infinity)-(Number(b.optimizationMs)||Infinity);if(sort==='name')return String(a.name||'').localeCompare(String(b.name||''),'es');return String(b.updatedAt||b.createdAt).localeCompare(String(a.updatedAt||a.createdAt));});
+      if(!isRecent)out.sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite)||0);return out;
     }
+    renderVisualHistory(){
+      const renderList=(root,items,isRecent)=>{root.innerHTML='';const ordered=this.filterAndSortHistory(items,isRecent);if(!ordered.length){root.innerHTML=`<div class="historyEmpty">${isRecent?'No hay optimizaciones recientes que coincidan con los filtros.':'No hay cargas guardadas que coincidan con los filtros.'}</div>`;return;}ordered.forEach(entry=>{const item=document.createElement('article');item.className='historyItem';const img=entry.thumbnail?`<img class="historyThumb" alt="Vista previa de la carga">`:`<div class="historyThumb historyEmpty">Sin vista</div>`;const score=Number(entry.stats?.score)||0,loaded=Number(entry.stats?.loaded)||0,left=Number(entry.stats?.left)||0,date=new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),checked=this.selectedHistoryIds.has(entry.id)?'checked':'';item.innerHTML=`<label class="historySelect"><input data-select type="checkbox" ${checked}><span>Seleccionar</span></label>${img}<div class="historyMeta"><div class="historyTitleRow"><strong></strong><span class="historyBadge ${left?'pending':'complete'}">${left?`${left} pendientes`:'Completa'}</span></div><small>${date}</small><small>${loaded} pallets dentro · ${score.toFixed(1)}% eficiencia · ${(Number(entry.stats?.usedLength)||0).toFixed(1)}" usados</small><small>${entry.strategy||'Manual'} · ${entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'sin tiempo registrado'}</small><div class="historyActions"><button data-open type="button">Abrir</button>${isRecent?'<button data-save type="button">Guardar</button>':'<button data-rename type="button">Renombrar</button><button data-favorite type="button"></button>'}<button data-report type="button">PDF</button><button data-delete type="button">Eliminar</button></div></div>`;if(entry.thumbnail)item.querySelector('img').src=entry.thumbnail;item.querySelector('strong').textContent=`${entry.favorite?'★ ':''}${entry.name||'Carga'}`;item.querySelector('[data-select]').onchange=e=>this.toggleHistorySelection(entry.id,e.target.checked);item.querySelector('[data-open]').onclick=()=>this.openHistoryEntry(entry.id);item.querySelector('[data-report]').onclick=()=>this.exportHistoryEntriesPdf([entry]);item.querySelector('[data-delete]').onclick=()=>this.deleteHistoryEntry(entry.id,isRecent);if(isRecent)item.querySelector('[data-save]').onclick=()=>this.saveRecentAsPermanent(entry.id);else{item.querySelector('[data-rename]').onclick=()=>this.renameHistoryEntry(entry.id);const fav=item.querySelector('[data-favorite]');fav.textContent=entry.favorite?'Quitar favorito':'Favorito';fav.classList.toggle('historyFavorite',!!entry.favorite);fav.onclick=()=>this.toggleHistoryFavorite(entry.id);}root.appendChild(item);});};
+      const saved=this.filterAndSortHistory(this.visualHistory.saved,false),recent=this.filterAndSortHistory(this.visualHistory.recent,true);$('savedHistoryCount').textContent=`(${saved.length})`;$('recentHistoryCount').textContent=`(${recent.length})`;renderList($('savedHistoryList'),this.visualHistory.saved,false);renderList($('recentHistoryList'),this.visualHistory.recent,true);this.updateHistorySelectionToolbar();this.updateHistorySummary();
+    }
+    createHistoryReportCanvas(entry){
+      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.29',620,1730);return canvas;
+    }
+    exportHistoryEntriesPdf(entries){try{const valid=(entries||[]).slice(0,10);if(!valid.length)return this.toast('Selecciona al menos una carga');const blob=canvasesToPdfBlob(valid.map(e=>this.createHistoryReportCanvas(e))),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-reportes-${new Date().toISOString().slice(0,10)}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);this.toast(`${valid.length} reporte${valid.length===1?'':'s'} exportado${valid.length===1?'':'s'} en PDF`);}catch(error){this.toast(error.message||'No se pudieron crear los reportes');}}
+    exportSelectedHistoryPdf(){this.exportHistoryEntriesPdf(this.getSelectedHistoryEntries());}
+    exportSelectedHistoryCsv(){const entries=this.getSelectedHistoryEntries();if(!entries.length)return this.toast('Selecciona al menos una carga');const esc=v=>`"${String(v??'').replaceAll('"','""')}"`,rows=[['Nombre','Fecha','Favorito','Trailer ancho','Trailer largo','Pilas','Pallets','Pendientes','Eficiencia','Largo usado','Tiempo segundos','Estrategia'],...entries.map(e=>[e.name,new Date(e.updatedAt||e.createdAt).toLocaleString('es-MX'),e.favorite?'Sí':'No',e.trailer?.width,e.trailer?.length,e.stacks?.length||0,e.stats?.loaded||0,e.stats?.left||0,Number(e.stats?.score||0).toFixed(1),Number(e.stats?.usedLength||0).toFixed(1),Number(e.optimizationMs||0)/1000,e.strategy||'Manual'])],blob=new Blob(['\ufeff'+rows.map(r=>r.map(esc).join(',')).join('\n')],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-historial-${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1200);this.toast('Historial exportado en CSV');}
+    deleteSelectedHistory(){const entries=this.getSelectedHistoryEntries();if(!entries.length)return;if(!confirm(`¿Eliminar ${entries.length} registro${entries.length===1?'':'s'} seleccionado${entries.length===1?'':'s'}?`))return;for(const e of entries){if(this.visualHistory.saved.some(x=>x.id===e.id))this.visualHistory.removeSaved(e.id);else this.visualHistory.removeRecent(e.id);}this.selectedHistoryIds.clear();this.renderVisualHistory();this.toast('Registros seleccionados eliminados');}
+    compareSelectedHistory(){const entries=this.getSelectedHistoryEntries();if(entries.length!==2)return this.toast('Selecciona exactamente dos cargas');const [a,b]=entries,metrics=[['Pallets cargados',Number(a.stats?.loaded)||0,Number(b.stats?.loaded)||0,'max'],['Pendientes',Number(a.stats?.left)||0,Number(b.stats?.left)||0,'min'],['Eficiencia',Number(a.stats?.score)||0,Number(b.stats?.score)||0,'max','%'],['Largo usado',Number(a.stats?.usedLength)||0,Number(b.stats?.usedLength)||0,'min','"'],['Tiempo',Number(a.optimizationMs||0)/1000,Number(b.optimizationMs||0)/1000,'min',' s']];const winner=(x,y,mode)=>Math.abs(x-y)<.05?'tie':mode==='min'?(x<y?'a':'b'):(x>y?'a':'b');let html=`<div class="compareNames"><div><strong>${a.name}</strong><small>${a.strategy||'Manual'}</small></div><div><strong>${b.name}</strong><small>${b.strategy||'Manual'}</small></div></div><div class="comparisonTable"><div class="comparisonRow head"><span>Métrica</span><span>Opción A</span><span>Opción B</span></div>`;for(const [name,av,bv,mode,suffix=''] of metrics){const win=winner(av,bv,mode),fmt=v=>(name==='Eficiencia'||name==='Largo usado'||name==='Tiempo'?v.toFixed(1):String(v))+suffix;html+=`<div class="comparisonRow"><span>${name}</span><strong class="${win==='a'?'metricWinner':''}">${fmt(av)}</strong><strong class="${win==='b'?'metricWinner':''}">${fmt(bv)}</strong></div>`;}const overallA=(Number(a.stats?.loaded)||0)*10000-(Number(a.stats?.left)||0)*1000+(Number(a.stats?.score)||0)*10-(Number(a.stats?.usedLength)||0),overallB=(Number(b.stats?.loaded)||0)*10000-(Number(b.stats?.left)||0)*1000+(Number(b.stats?.score)||0)*10-(Number(b.stats?.usedLength)||0);html+=`</div><div class="comparisonVerdict"><strong>${Math.abs(overallA-overallB)<1?'Resultado muy parejo':overallA>overallB?`Mejor resultado general: ${a.name}`:`Mejor resultado general: ${b.name}`}</strong><p>La prioridad es cargar más pallets, dejar menos pendientes, usar menos largo y lograr mayor eficiencia.</p></div>`;$('comparisonContent').innerHTML=html;$('comparisonPanel').hidden=false;$('comparisonPanel').scrollIntoView({behavior:'smooth',block:'nearest'});}
+
 
     compact(){
       if(!this.state.stacks.length)return this.toast("No hay pilas");
@@ -1545,41 +1926,98 @@ function normalizeLibraryItem(raw={}){
       if(!moved)return this.toast("La carga ya está compactada");
       this.store.remember();this.state.stacks=after;this.render();this.toast(`Compactación: ${moved} pila${moved===1?"":"s"} ajustada${moved===1?"":"s"}`);
     }
+    solutionQuality(sol){
+      if(!sol)return -Infinity;
+      const loadedPallets=Number(sol.loadedPallets??(sol.stacks||[]).reduce((n,x)=>n+(Number(x.qty)||1),0));
+      const loadedStacks=Number(sol.loadedStacks??(sol.stacks||[]).length);
+      const left=Number(sol.unplacedPallets??(sol.unplaced||[]).reduce((n,x)=>n+(Number(x.qty)||1),0));
+      const used=Number(sol.used??Geometry.usedLength(sol.stacks||[]));
+      const efficiency=Number(sol.efficiency)||0;
+      return loadedPallets*1e7+loadedStacks*1e5-left*1e4+efficiency*100-used;
+    }
+    currentSolutionSnapshot(){
+      const stacks=clone(this.state.stacks||[]),unplaced=clone(this.state.pending||[]),loadedPallets=stacks.reduce((n,x)=>n+(Number(x.qty)||1),0),unplacedPallets=unplaced.reduce((n,x)=>n+(Number(x.qty)||1),0);
+      return {stacks,unplaced,loadedStacks:stacks.length,loadedPallets,unplacedStacks:unplaced.length,unplacedPallets,used:Geometry.usedLength(stacks),efficiency:calculateLoadStatistics(stacks,this.state.trailer).efficiency,family:this.lastWinningStrategy||"Resultado actual"};
+    }
+    updateProgressiveStatus(text,active=true){
+      const box=$("progressiveStatus"),label=$("progressiveStatusText");if(!box||!label)return;box.hidden=false;label.textContent=text;box.classList.toggle("active",active);$("stopProgressiveBtn").hidden=!active;
+    }
+    hideProgressiveOffer(){this.pendingProgressiveImprovement=null;const el=$("progressiveOffer");if(el)el.hidden=true;}
+    stopProgressiveOptimization(silent=false){
+      if(this.progressiveSession)this.progressiveSession.cancelled=true;
+      this.progressiveSession=null;this.updateProgressiveStatus("Búsqueda progresiva detenida.",false);$("stopProgressiveBtn").hidden=true;
+      if(!silent)this.toast("Búsqueda de mejoras detenida");
+    }
+    showProgressiveOffer(sol,previous){
+      this.pendingProgressiveImprovement={solution:clone(sol),previous:clone(previous)};
+      const extra=Math.max(0,(sol.loadedPallets||0)-(previous.loadedPallets||0)),eff=(Number(sol.efficiency)||0)-(Number(previous.efficiency)||0),saved=Math.max(0,(Number(previous.used)||0)-(Number(sol.used)||0));
+      $("progressiveOfferText").textContent=`Encontré una solución mejor${extra?`: +${extra} pallet${extra===1?'':'s'}`:''}${eff>.05?` · +${eff.toFixed(1)}% eficiencia`:''}${saved>.05?` · ${saved.toFixed(1)}\" menos de largo`:''}.`;
+      $("progressiveOffer").hidden=false;
+    }
+    applyProgressiveImprovement(){
+      const item=this.pendingProgressiveImprovement;if(!item)return;
+      const sol=item.solution,validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Mejora inválida: ${explainValidation(validation)}`);
+      this.store.remember();this.state.stacks=clone(sol.stacks);this.state.pending=clone(sol.unplaced||[]);this.lastWinningStrategy=sol.family||"Optimización progresiva";this.lastOptimizationMs=this.progressiveSession?performance.now()-this.progressiveSession.started:this.lastOptimizationMs;this.render();this.renderSolutions(this.progressiveSession?.bestSolutions||[sol],Geometry.usedLength(item.previous.stacks||[]));this.recordRecentOptimization();this.hideProgressiveOffer();this.toast("Mejora progresiva aplicada");
+    }
+    ignoreProgressiveImprovement(){this.hideProgressiveOffer();this.toast("Se conservó el plano actual");}
+    compareProgressiveImprovement(){
+      const item=this.pendingProgressiveImprovement;if(!item)return;const a=item.previous,b=item.solution;
+      $("optimizerSummary").textContent=`Comparación: actual ${a.loadedPallets} pallets, ${(a.efficiency||0).toFixed(1)}% y ${(a.used||0).toFixed(1)}\"; mejora ${b.loadedPallets} pallets, ${(b.efficiency||0).toFixed(1)}% y ${(b.used||0).toFixed(1)}\".`;
+      $("optimizerPanel").scrollIntoView({behavior:"smooth",block:"nearest"});
+    }
+    scheduleProgressiveRound(session){
+      if(!session||session.cancelled||this.manualEditMode)return this.stopProgressiveOptimization(true);
+      const elapsed=performance.now()-session.started,remaining=30000-elapsed;
+      if(remaining<350){this.progressiveSession=null;this.updateProgressiveStatus(this.pendingProgressiveImprovement?"Búsqueda terminada: hay una mejora pendiente de aplicar.":"Búsqueda terminada: se conservó la mejor solución encontrada.",false);$("stopProgressiveBtn").hidden=true;this.strategyMemory.recordOutcome(session.original,this.state.trailer,session.best,"optimización adaptativa",session.baselineStats);this.recordRecentOptimization();return;}
+      session.round++;
+      this.updateProgressiveStatus(`IA buscando mejoras… ${(elapsed/1000).toFixed(0)} s · ronda ${session.round} · mejor actual: ${session.best.loadedStacks} pilas / ${session.best.loadedPallets} pallets`,true);
+      setTimeout(()=>{
+        if(session.cancelled||this.manualEditMode)return this.stopProgressiveOptimization(true);
+        const budget=Math.min(3600,Math.max(900,remaining-120));
+        const report=runPortfolioSearch(session.original,this.state.trailer,{totalTimeMs:budget,patterns:[],strategies:this.strategyMemory.items,baselineSolutions:session.bestSolutions||[]});
+        if(report.ok&&report.solutions?.length){
+          const candidate=report.solutions[0];session.bestSolutions=report.solutions;
+          if(this.solutionQuality(candidate)>this.solutionQuality(session.best)+.1){
+            const previous=session.best;session.best=clone(candidate);this.lastSolutions=report.solutions;
+            this.showProgressiveOffer(candidate,previous);
+            if(!(candidate.unplaced||[]).length){this.progressiveSession=null;this.updateProgressiveStatus("Solución completa encontrada. Puedes aplicarla o conservar el plano actual.",false);$("stopProgressiveBtn").hidden=true;this.strategyMemory.recordOutcome(session.original,this.state.trailer,candidate,"optimización adaptativa",session.baselineStats);if(!(candidate.unplaced||[]).length)this.patternMemory.learnComplete(candidate.stacks,this.state.trailer);return;}
+          }
+        }
+        this.scheduleProgressiveRound(session);
+      },80);
+    }
     optimize(){
+      if(this.progressiveSession)this.stopProgressiveOptimization(true);
+      this.hideProgressiveOffer();
       const optimizationStarted=performance.now();this.currentOptimizationSessionId=uid();
       const allInput=[...this.state.stacks,...(this.state.pending||[])];
       if(!allInput.length)return this.toast("No hay pilas");
-      $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Fase rápida: buscando durante hasta 9 segundos…";$("optimizerResults").innerHTML="";
-      const original=clone(allInput),beforeUsed=Geometry.usedLength(this.state.stacks);
-      const applyReport=(report,phaseLabel)=>{
-        if(!report.ok){$("optimizerSummary").textContent=report.message;this.toast(report.message);return null;}
-        const solutions=report.solutions;if(!solutions.length)return null;
-        const best=solutions[0],validation=validateLayout(best.stacks,this.state.trailer);if(!validation.ok)return null;
-        this.lastOptimizationMs=Math.max(0,performance.now()-optimizationStarted);this.lastWinningStrategy=best.family||phaseLabel||"Optimización IA";
-        this.lastSolutions=solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.strategyMemory.learn(best.stacks,this.state.trailer,"optimización");if(!(best.unplaced||[]).length)this.patternMemory.learnComplete(best.stacks,this.state.trailer);this.render();
-        const saved=Math.max(0,beforeUsed-best.used),leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?"":"s"} pendientes (${best.unplacedPallets} pallets)`:' · Toda la carga quedó dentro';
-        $("optimizerSummary").textContent=`${phaseLabel}: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets cargados · ${saved.toFixed(1)}\" menos de largo${leftText}`;
-        this.renderSolutions(solutions,beforeUsed);return best;
-      };
+      $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Buscando una primera solución rápida…";$("optimizerResults").innerHTML="";this.updateProgressiveStatus("Preparando optimización progresiva…",true);
+      const original=clone(allInput),beforeUsed=Geometry.usedLength(this.state.stacks),baselineStats={loaded:this.state.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0),left:(this.state.pending||[]).reduce((n,s)=>n+(Number(s.qty)||1),0),used:beforeUsed};
+      this.strategyMemory.prepare(original,this.state.trailer);
       setTimeout(()=>{
-        const fast=new LoadEngine(this.state.trailer,{timeLimitMs:9000,patterns:this.patternMemory.patterns,strategies:this.strategyMemory.items});const fastReport=fast.optimize(original);const fastBest=applyReport(fastReport,"Resultado rápido");
-        if(!fastBest||!fastBest.unplacedStacks){if(fastBest)this.recordRecentOptimization();this.toast("Optimización terminada");return;}
-        $("optimizerSummary").textContent+=` · Búsqueda profunda activa hasta 30 segundos…`;
-        setTimeout(()=>{
-          const merged=runPortfolioSearch(original,this.state.trailer,{totalTimeMs:21000,patterns:[],strategies:this.strategyMemory.items,baselineSolutions:fastReport.solutions||[]});
-          if(!merged.ok)return;
-          const deepBest=applyReport(merged,"Resultado final · portafolio independiente 9→30 s");
-          if(deepBest)this.recordRecentOptimization();this.toast(deepBest&&deepBest.unplacedStacks?"Se conservó la mayor carga encontrada; revisa Pendientes":"Toda la carga quedó acomodada");
-        },50);
-      },30);
+        const fast=new LoadEngine(this.state.trailer,{timeLimitMs:3200,patterns:this.patternMemory.patterns,strategies:this.strategyMemory.items});const report=fast.optimize(original);
+        if(!report.ok||!report.solutions?.length){this.updateProgressiveStatus("No se encontró una solución válida.",false);$("optimizerSummary").textContent=report.message||"No se encontró una solución válida";this.toast(report.message||"No se pudo optimizar");return;}
+        const best=report.solutions[0],validation=validateLayout(best.stacks,this.state.trailer);if(!validation.ok){this.updateProgressiveStatus("La solución rápida no pasó la validación.",false);return this.toast("La solución rápida no fue válida");}
+        this.lastOptimizationMs=performance.now()-optimizationStarted;this.lastWinningStrategy=best.family||"Solución rápida";this.lastSolutions=report.solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.render();this.renderSolutions(report.solutions,beforeUsed);
+        const leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?'':'s'} pendientes (${best.unplacedPallets} pallets)`:' · Toda la carga quedó dentro';
+        $("optimizerSummary").textContent=`Primera solución: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets · ${(best.efficiency||0).toFixed(1)}% eficiencia${leftText}`;
+        if(!best.unplacedStacks){this.updateProgressiveStatus("Solución completa encontrada en la fase rápida.",false);$("stopProgressiveBtn").hidden=true;this.strategyMemory.recordOutcome(original,this.state.trailer,best,"optimización adaptativa",baselineStats);this.patternMemory.learnComplete(best.stacks,this.state.trailer);this.recordRecentOptimization();this.toast("Toda la carga quedó acomodada");return;}
+        const session={id:uid(),started:optimizationStarted,original,baselineStats,best:clone(best),bestSolutions:report.solutions,round:0,cancelled:false};this.progressiveSession=session;
+        this.updateProgressiveStatus(`Primera solución disponible · IA seguirá buscando hasta 30 s. Mejor actual: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets`,true);
+        this.toast("Primera solución lista; la IA continúa buscando mejoras");
+        this.scheduleProgressiveRound(session);
+      },40);
     }
     renderSolutions(solutions,beforeUsed){
       const root=$("optimizerResults");root.innerHTML="";
       solutions.forEach((sol,i)=>{
         const card=document.createElement("article");card.className="optimizerResult";
         const left=sol.unplacedStacks?` · <b>${sol.unplacedStacks} fuera</b> (${sol.unplacedPallets} pallets): ${sol.unplaced.slice(0,3).map(s=>s.name).join(", ")}${sol.unplaced.length>3?"…":""}`:" · <b>Carga completa</b>";
-        const label=sol.family?`${i===0?"Mejor solución":`Alternativa ${i+1}`} · ${sol.family}`:(i===0?"Mejor solución":`Alternativa ${i+1}`);
-        card.innerHTML=`<div><strong>${label}</strong><p>${sol.loadedStacks} pilas / ${sol.loadedPallets} pallets dentro · ${sol.used.toFixed(1)}\" usados · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.rotated||0} giradas${left}</p></div><button type="button">Aplicar</button>`;
+        const medal=i===0?"🥇":i===1?"🥈":"🥉";
+        const label=sol.family?`${medal} ${i===0?"Mejor solución":`Alternativa ${i+1}`} · ${sol.family}`:`${medal} ${i===0?"Mejor solución":`Alternativa ${i+1}`}`;
+        const rank=Number(sol.rankScore)||0,reasons=(sol.rankReasons||[]).join(" · ");
+        card.innerHTML=`<div><strong>${label}</strong><p><b>${rank.toFixed(1)} puntos · ${sol.rankLabel||"Evaluada"}</b>${reasons?` · ${reasons}`:""}</p><p>${sol.loadedStacks} pilas / ${sol.loadedPallets} pallets dentro · ${sol.used.toFixed(1)}" usados · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.rotated||0} giradas${left}</p></div><button type="button">Aplicar</button>`;
         card.querySelector("button").onclick=()=>{const validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Solución inválida: ${explainValidation(validation)}`);this.store.remember();this.state.stacks=clone(sol.stacks);this.state.pending=clone(sol.unplaced||[]);this.lastWinningStrategy=sol.family||label;this.render();this.toast("Solución validada y aplicada");};root.appendChild(card);
       });
     }
@@ -1589,7 +2027,7 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.18",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.19.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.30",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.29.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
@@ -1632,13 +2070,61 @@ function normalizeLibraryItem(raw={}){
       }catch(error){if(error?.name!=="AbortError")this.toast(error.message||"No se pudo compartir el reporte");}
     }
     async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.pending=d.pending||[];this.state.library=(d.library||this.state.library).map(normalizeLibraryItem);this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
-    renderLibrary(){const sel=$("librarySelect"),current=sel.value,q=($("catalogSearch")?.value||"").trim().toLowerCase();sel.innerHTML='<option value="">— Nueva medida —</option>';const items=[...this.state.library].sort((a,b)=>Number(b.favorite)-Number(a.favorite)||a.name.localeCompare(b.name)).filter(item=>!q||`${item.name} ${item.l}x${item.w} ${item.type} ${item.category} ${item.notes||""}`.toLowerCase().includes(q));items.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.favorite?"★ ":""}${item.name} · ${item.l}×${item.w} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;const status=$("catalogSearchStatus");if(status)status.textContent=q?`${items.length} medida${items.length===1?"":"s"} coincide${items.length===1?"":"n"}. Selecciónala en Biblioteca.`:`${this.state.library.length} medida${this.state.library.length===1?"":"s"} guardada${this.state.library.length===1?"":"s"}. Usa Biblioteca para seleccionar y editar.`;}
+    setManualEditMode(enabled){
+      if(enabled&&this.progressiveSession)this.stopProgressiveOptimization(true);
+      this.manualEditMode=Boolean(enabled);
+      if(!this.manualEditMode)this.state.selectedId=null;
+      document.body.classList.toggle("manual-edit-mode",this.manualEditMode);
+      $("compactPlanWrap").hidden=this.manualEditMode;
+      $("manualCanvasWrap").hidden=!this.manualEditMode;
+      $("manualModeBtn").hidden=this.manualEditMode;
+      $("finishManualBtn").hidden=!this.manualEditMode;
+      $("planModeTitle").textContent=this.manualEditMode?"Edición manual":"Plano compacto";
+      $("planModeHelp").textContent=this.manualEditMode?"Vista vertical editable: mueve, gira o elimina pilas.":"Vista horizontal para revisar el resultado de la automatización. Las medidas reales no cambian.";
+      if(!this.manualEditMode)$("floatingTools").hidden=true;
+      this.render();
+      if(this.manualEditMode)setTimeout(()=>$("manualCanvasWrap").scrollIntoView({behavior:"smooth",block:"start"}),40);
+    }
+    renderCompactPlan(){
+      const canvas=$("compactPlanCanvas"),wrap=$("compactPlanWrap");if(!canvas||!wrap)return;
+      const trailer=this.state.trailer,stacks=this.state.stacks||[];
+      const maxCss=Math.max(280,Math.min(1000,(wrap.clientWidth||window.innerWidth)-24));
+      const padding=22,labelBand=32;
+      const scale=Math.max(.35,Math.min(1.3,(maxCss-padding*2)/Math.max(1,trailer.length)));
+      const cssW=Math.max(280,Math.round(trailer.length*scale+padding*2));
+      const cssH=Math.max(118,Math.round(trailer.width*scale+padding*2+labelBand));
+      const dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(cssW*dpr);canvas.height=Math.round(cssH*dpr);canvas.style.width=`${cssW}px`;canvas.style.height=`${cssH}px`;
+      const ctx=canvas.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,cssW,cssH);
+      ctx.fillStyle="#dde3ea";ctx.fillRect(0,0,cssW,cssH);
+      const ox=padding,oy=padding+labelBand;ctx.fillStyle="#fff";ctx.strokeStyle="#111827";ctx.lineWidth=3;ctx.fillRect(ox,oy,trailer.length*scale,trailer.width*scale);ctx.strokeRect(ox,oy,trailer.length*scale,trailer.width*scale);
+      ctx.strokeStyle="rgba(15,23,42,.08)";ctx.lineWidth=1;for(let x=0;x<trailer.length;x+=24){ctx.beginPath();ctx.moveTo(ox+x*scale,oy);ctx.lineTo(ox+x*scale,oy+trailer.width*scale);ctx.stroke();}
+      for(let y=0;y<trailer.width;y+=24){ctx.beginPath();ctx.moveTo(ox,oy+y*scale);ctx.lineTo(ox+trailer.length*scale,oy+y*scale);ctx.stroke();}
+      for(const s of stacks){const valid=this.valid(s);ctx.fillStyle=s.locked?"rgba(124,58,237,.24)":valid?"rgba(37,99,235,.22)":"rgba(220,38,38,.25)";ctx.strokeStyle=s.locked?"#7c3aed":valid?"#16a34a":"#dc2626";ctx.lineWidth=Math.max(1,Math.min(2,scale*1.5));const x=ox+s.y*scale,y=oy+s.x*scale,w=s.l*scale,h=s.w*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);if(w>24&&h>15){ctx.fillStyle="#111827";ctx.font=`700 ${Math.max(7,Math.min(11,h*.32))}px system-ui`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(String(s.name||"Pila").slice(0,12),x+w/2,y+h/2);}}
+      ctx.fillStyle="#111827";ctx.font="700 11px system-ui";ctx.textAlign="left";ctx.textBaseline="alphabetic";ctx.fillText("NARIZ",ox,18);ctx.textAlign="right";ctx.fillText("PUERTAS",ox+trailer.length*scale,18);ctx.textAlign="center";ctx.fillStyle="#475569";ctx.font="600 10px system-ui";ctx.fillText(`${trailer.length}" largo × ${trailer.width}" ancho · ${stacks.length} pilas`,cssW/2,cssH-5);
+    }
+    renderLibrary(){
+      const sel=$("librarySelect"),manager=$("catalogManageSelect"),current=sel.value,managerCurrent=manager?.value||"",q=($("catalogSearch")?.value||"").trim().toLowerCase();
+      const items=[...this.state.library].sort((a,b)=>Number(b.favorite)-Number(a.favorite)||a.name.localeCompare(b.name)).filter(item=>!q||`${item.name} ${item.l}x${item.w} ${item.type} ${item.category} ${item.notes||""}`.toLowerCase().includes(q));
+      sel.innerHTML='<option value="">— Nueva medida —</option>';
+      if(manager)manager.innerHTML='<option value="">— Selecciona una medida —</option>';
+      items.forEach(item=>{
+        const text=`${item.favorite?"★ ":""}${item.name} · ${item.l}×${item.w} · ${item.type} · máx ${item.maxHeight}`;
+        const o=document.createElement("option");o.value=item.id;o.textContent=text;sel.appendChild(o);
+        if(manager){const m=document.createElement("option");m.value=item.id;m.textContent=text;manager.appendChild(m);}
+      });
+      if([...sel.options].some(o=>o.value===current))sel.value=current;
+      if(manager&&[...manager.options].some(o=>o.value===managerCurrent))manager.value=managerCurrent;
+      const status=$("catalogSearchStatus");if(status)status.textContent=q?`${items.length} medida${items.length===1?"":"s"} coincide${items.length===1?"":"n"}. Selecciónala para editar, duplicar o eliminar.`:`${this.state.library.length} medida${this.state.library.length===1?"":"s"} guardada${this.state.library.length===1?"":"s"}.`;
+      this.updateCatalogSummary();
+    }
+
     render(){
       const trailer=$("trailer");trailer.style.width=`${this.state.trailer.width*SCALE}px`;trailer.style.height=`${this.state.trailer.length*SCALE}px`;trailer.querySelectorAll(".stack").forEach(n=>n.remove());
-      this.state.stacks.forEach(s=>{const el=document.createElement("div");el.className="stack"+(s.id===this.state.selectedId?" selected":"")+(s.locked?" locked":"")+(this.valid(s)?"":" invalid");el.dataset.id=s.id;el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.style.width=`${s.w*SCALE}px`;el.style.height=`${s.l*SCALE}px`;el.innerHTML=`${s.name}<small>${s.qty} alto · ${s.type}</small>`;trailer.appendChild(el);this.wireDrag(el,s);});
+      this.state.stacks.forEach(s=>{const el=document.createElement("div");el.className="stack"+(s.id===this.state.selectedId?" selected":"")+(s.locked?" locked":"")+(this.valid(s)?"":" invalid");el.dataset.id=s.id;el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.style.width=`${s.w*SCALE}px`;el.style.height=`${s.l*SCALE}px`;el.innerHTML=`${s.name}<small>${s.qty} alto · ${s.type}</small>`;trailer.appendChild(el);if(this.manualEditMode)this.wireDrag(el,s);});
+      $("compactPlanWrap").hidden=this.manualEditMode;$("manualCanvasWrap").hidden=!this.manualEditMode;$("manualModeBtn").hidden=this.manualEditMode;$("finishManualBtn").hidden=!this.manualEditMode;this.renderCompactPlan();
       this.renderLibrary();this.renderCatalog();this.renderSelection();this.renderMetrics();this.renderLoadStatistics();this.renderPatterns();this.renderPending();this.renderVisualHistory();
     }
-    renderSelection(){const s=this.selected();$("selectedInfo").textContent=s?`${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${s.locked?" · bloqueada":""}`:"Ninguna seleccionada";$("floatingTools").hidden=!s;if(s){$("bottomSelectedName").textContent=`${s.name} · ${s.qty} alto · ${s.type}`;$("floatLockBtn").textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;$("floatRotateBtn").disabled=!can;}}
+    renderSelection(){const s=this.selected();$("selectedInfo").textContent=s?`${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${s.locked?" · bloqueada":""}`:"Ninguna seleccionada";$("floatingTools").hidden=!s||!this.manualEditMode;if(s){$("bottomSelectedName").textContent=`${s.name} · ${s.qty} alto · ${s.type}`;$("floatLockBtn").textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;$("floatRotateBtn").disabled=!can;}}
     renderMetrics(){const used=Geometry.usedLength(this.state.stacks),free=Math.max(0,this.state.trailer.length-used),area=Geometry.floorArea(this.state.stacks),total=this.state.trailer.width*this.state.trailer.length,env=Math.max(1,this.state.trailer.width*used);$("metricStacks").textContent=this.state.stacks.length;$("metricPallets").textContent=this.state.stacks.reduce((a,s)=>a+s.qty,0);$("metricUsed").textContent=`${used.toFixed(1)}\"`;$("metricFree").textContent=`${free.toFixed(1)}\"`;$("metricUtilization").textContent=`${Math.min(100,area/Math.max(1,total)*100).toFixed(1)}%`;$("metricEfficiency").textContent=`${Math.min(100,area/env*100).toFixed(1)}%`;const bad=this.state.stacks.some(s=>!this.valid(s));$("metricStatus").textContent=bad?"Hay conflicto":"Carga válida";$("metricStatus").style.color=bad?"#dc2626":"#16a34a";$("freeZone").style.top=`${used*SCALE}px`;$("freeZone").style.height=`${free*SCALE}px`;}
     renderLoadStatistics(){
       const stats=calculateLoadStatistics(this.state.stacks,this.state.trailer);
@@ -1657,7 +2143,7 @@ function normalizeLibraryItem(raw={}){
       ring.style.setProperty("--score",indicator.score.toFixed(1));ring.className=`efficiencyRing ${indicator.tone}`;$("efficiencyScore").textContent=`${indicator.score.toFixed(1)}%`;$("efficiencyLabel").textContent=indicator.label;
       $("efficiencyExplanation").textContent=indicator.reasons.length?`Puede mejorar por: ${indicator.reasons.join("; ")}.`:(indicator.score>=99.9?"Carga completa, compacta y sin huecos relevantes.":"Carga válida con oportunidad mínima de compactación.");
     }
-    wireDrag(el,s){let active=false,startX=0,startY=0,origin=null,before=null,moved=false;el.onpointerdown=e=>{e.preventDefault();e.stopPropagation();this.state.selectedId=s.id;this.renderSelection();if(s.locked)return this.toast("Esta pila está bloqueada");active=true;startX=e.clientX;startY=e.clientY;origin={x:s.x,y:s.y};before=this.store.snapshot();moved=false;el.setPointerCapture?.(e.pointerId);};el.onpointermove=e=>{if(!active)return;const dx=(e.clientX-startX)/SCALE,dy=(e.clientY-startY)/SCALE;if(Math.abs(dx)>0.5||Math.abs(dy)>0.5)moved=true;s.x=roundQuarter(origin.x+dx);s.y=roundQuarter(origin.y+dy);el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.classList.toggle("invalid",!this.valid(s));this.renderMetrics();};const finish=()=>{if(!active)return;active=false;if(moved){this.store.history.push(before);this.store.future=[];const others=this.state.stacks.filter(o=>o.id!==s.id);const axes=Geometry.candidateAxes(s,others,this.state.trailer);const nx=[...axes.xs].sort((a,b)=>Math.abs(a-s.x)-Math.abs(b-s.x))[0],ny=[...axes.ys].sort((a,b)=>Math.abs(a-s.y)-Math.abs(b-s.y))[0];const test={...s,x:nx,y:ny};if(Math.abs(nx-s.x)<=4&&Geometry.valid(test,others,this.state.trailer))s.x=nx;const test2={...s,y:ny};if(Math.abs(ny-s.y)<=4&&Geometry.valid(test2,others,this.state.trailer))s.y=ny;this.render();if(validateLayout(this.state.stacks,this.state.trailer).ok)this.strategyMemory.learn(this.state.stacks,this.state.trailer,"corrección manual");}};el.onpointerup=finish;el.onpointercancel=finish;}
+    wireDrag(el,s){let active=false,startX=0,startY=0,origin=null,before=null,moved=false;el.onpointerdown=e=>{e.preventDefault();e.stopPropagation();this.state.selectedId=s.id;this.renderSelection();if(s.locked)return this.toast("Esta pila está bloqueada");active=true;startX=e.clientX;startY=e.clientY;origin={x:s.x,y:s.y};before=this.store.snapshot();moved=false;el.setPointerCapture?.(e.pointerId);};el.onpointermove=e=>{if(!active)return;const dx=(e.clientX-startX)/SCALE,dy=(e.clientY-startY)/SCALE;if(Math.abs(dx)>0.5||Math.abs(dy)>0.5)moved=true;s.x=roundQuarter(origin.x+dx);s.y=roundQuarter(origin.y+dy);el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.classList.toggle("invalid",!this.valid(s));this.renderMetrics();};const finish=()=>{if(!active)return;active=false;if(moved){this.store.history.push(before);this.store.future=[];const others=this.state.stacks.filter(o=>o.id!==s.id);const axes=Geometry.candidateAxes(s,others,this.state.trailer);const nx=[...axes.xs].sort((a,b)=>Math.abs(a-s.x)-Math.abs(b-s.x))[0],ny=[...axes.ys].sort((a,b)=>Math.abs(a-s.y)-Math.abs(b-s.y))[0];const test={...s,x:nx,y:ny};if(Math.abs(nx-s.x)<=4&&Geometry.valid(test,others,this.state.trailer))s.x=nx;const test2={...s,y:ny};if(Math.abs(ny-s.y)<=4&&Geometry.valid(test2,others,this.state.trailer))s.y=ny;this.render();if(validateLayout(this.state.stacks,this.state.trailer).ok){try{const previous=JSON.parse(before);this.strategyMemory.learnManual(previous.stacks||[],this.state.stacks,this.state.trailer);}catch{}}}};el.onpointerup=finish;el.onpointercancel=finish;}
   }
 
 

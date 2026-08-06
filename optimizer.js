@@ -19,6 +19,48 @@ function solutionDistance(a,b,trailer){
   return (count?total/count:0)*0.8+missingDiff*0.2;
 }
 
+
+function intelligentSolutionRank(sol,trailer,best=null){
+  const pendingStacks=Number(sol.unplacedStacks??(sol.unplaced||[]).length)||0;
+  const pendingPallets=Number(sol.unplacedPallets??(sol.unplaced||[]).reduce((n,x)=>n+(Number(x.qty)||1),0))||0;
+  const efficiency=Math.max(0,Math.min(100,Number(sol.efficiency)||0));
+  const used=Math.max(0,Number(sol.used)||Geometry.usedLength(sol.stacks||[]));
+  const moved=Math.max(0,Number(sol.moved)||0),rotated=Math.max(0,Number(sol.rotated)||0);
+  const total=Math.max(1,(sol.stacks||[]).length+pendingStacks);
+  const completion=pendingStacks===0?48:Math.max(0,42-pendingPallets*5-pendingStacks*3);
+  const utilization=efficiency*0.24;
+  const lengthQuality=Math.max(0,10*(1-used/Math.max(1,trailer.length)));
+  const stability=Math.max(0,8-(moved/total)*5-(rotated/total)*2);
+  const compactness=Math.max(0,7-Math.min(7,(Number(sol.score)||0)/2500));
+  const learned=/aprendid|adaptativ|simulaci/i.test(`${sol.name||''} ${sol.family||''}`)?3:0;
+  const score=Math.max(0,Math.min(100,completion+utilization+lengthQuality+stability+compactness+learned));
+  const reasons=[];
+  if(!pendingStacks)reasons.push('carga completa');
+  else reasons.push(`${pendingStacks} pila${pendingStacks===1?'':'s'} pendiente${pendingStacks===1?'':'s'}`);
+  if(efficiency>=97)reasons.push('ocupación excelente');else if(efficiency>=92)reasons.push('buena ocupación');
+  if(best&&used+0.25<(Number(best.used)||Infinity))reasons.push('usa menos largo');
+  if(moved<=Math.max(1,total*.15))reasons.push('pocos movimientos');
+  const label=score>=95?'Excelente':score>=88?'Muy buena':score>=78?'Buena':score>=65?'Aceptable':'Mejorable';
+  return {rankScore:score,rankLabel:label,rankReasons:reasons.slice(0,3)};
+}
+
+function rankSolutionsIntelligently(solutions,trailer){
+  if(!solutions.length)return [];
+  const provisional=[...solutions].sort((a,b)=>
+    b.loadedPallets-a.loadedPallets||b.loadedStacks-a.loadedStacks||a.score-b.score
+  );
+  const best=provisional[0];
+  for(const sol of solutions)Object.assign(sol,intelligentSolutionRank(sol,trailer,best));
+  return [...solutions].sort((a,b)=>
+    b.loadedPallets-a.loadedPallets ||
+    b.loadedStacks-a.loadedStacks ||
+    b.rankScore-a.rankScore ||
+    a.unplacedPallets-b.unplacedPallets ||
+    a.used-b.used ||
+    a.score-b.score
+  );
+}
+
 function selectDiverseSolutions(sorted,limit,trailer){
   if(!sorted.length)return [];
   const selected=[sorted[0]],remaining=sorted.slice(1);
@@ -29,7 +71,9 @@ function selectDiverseSolutions(sorted,limit,trailer){
       const qualityGap=(sorted[0].loadedPallets-candidate.loadedPallets)*4+(sorted[0].loadedStacks-candidate.loadedStacks)*2;
       const minDistance=Math.min(...selected.map(s=>solutionDistance(candidate,s,trailer)));
       const familyBonus=selected.some(s=>s.family&&candidate.family&&s.family===candidate.family)?0:0.25;
-      const value=minDistance*10+familyBonus-qualityGap;
+      const similarityPenalty=minDistance<0.035?1.5:0;
+      const rankBonus=(Number(candidate.rankScore)||0)/40;
+      const value=minDistance*12+familyBonus+rankBonus-qualityGap-similarityPenalty;
       if(value>bestValue){bestValue=value;bestIndex=i;}
     }
     selected.push(remaining.splice(bestIndex,1)[0]);
@@ -731,6 +775,109 @@ class LoadEngine {
     return stacks;
   }
 
+
+  simulateMovementSequences(placed,unplaced,originals,{maxDepth=3,beamWidth=24}={}){
+    // v5.28: ensaya secuencias completas sobre copias del plano. Ningún
+    // movimiento toca la solución visible hasta que la secuencia final supera
+    // la mejor carga conocida y pasa la validación completa.
+    const baseline=placed.map(Geometry.clone);
+    if(!validateLayout(baseline,this.trailer).ok)return [];
+    const originalMap=new Map(originals.map(s=>[s.id,s]));
+    const baselineIds=new Set(baseline.map(s=>s.id));
+    const pending=(unplaced||originals.filter(s=>!baselineIds.has(s.id))).map(Geometry.clone);
+    const baselinePallets=baseline.reduce((n,s)=>n+(Number(s.qty)||1),0);
+    const candidates=[];
+    const stateKey=st=>st.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join('|');
+    const evaluate=st=>{
+      const ids=new Set(st.map(s=>s.id));
+      const missing=originals.filter(s=>!ids.has(s.id));
+      const pallets=st.reduce((n,s)=>n+(Number(s.qty)||1),0);
+      const area=Geometry.floorArea(st);
+      const used=Geometry.usedLength(st);
+      const dead=Math.max(0,this.trailer.width*used-area);
+      return {missing,pallets,rank:pallets*1e12+st.length*1e9-area*1e3-used*1e2-dead-layoutScore(st,this.trailer,originals)};
+    };
+    const tryPending=layout=>{
+      let st=layout.map(Geometry.clone), remaining=[];
+      const ordered=[...pending].sort((a,b)=>b.w*b.l-a.w*a.l);
+      for(const piece of ordered){
+        const options=this.placementOptions(piece,st,120);
+        if(!options.length){remaining.push(piece);continue;}
+        options.sort((a,b)=>(a.y+a.l)-(b.y+b.l)||Geometry.contactScore(b,st,this.trailer)-Geometry.contactScore(a,st,this.trailer)||a.x-b.x);
+        st.push(options[0]);
+      }
+      st=this.automaticCompact(st,'medium');
+      if(!validateLayout(st,this.trailer).ok)return null;
+      const ids=new Set(st.map(s=>s.id));
+      return {stacks:st,unplaced:originals.filter(s=>!ids.has(s.id))};
+    };
+
+    const start={stacks:baseline,moves:[]};
+    let beam=[start];
+    const globalSeen=new Set([stateKey(baseline)]);
+    for(let depth=1;depth<=maxDepth&&this.hasTime();depth++){
+      const next=[];
+      for(const state of beam){
+        if(!this.hasTime())break;
+        const movable=state.stacks.filter(s=>!s.locked).sort((a,b)=>{
+          const ac=Geometry.contactScore(a,state.stacks.filter(o=>o.id!==a.id),this.trailer);
+          const bc=Geometry.contactScore(b,state.stacks.filter(o=>o.id!==b.id),this.trailer);
+          return ac-bc||(b.y+b.l)-(a.y+a.l);
+        }).slice(0,12);
+        for(const piece of movable){
+          if(!this.hasTime())break;
+          const others=state.stacks.filter(s=>s.id!==piece.id);
+          const options=this.placementOptions(piece,others,18)
+            .filter(c=>!samePose(c,piece))
+            .slice(0,6);
+          for(const option of options){
+            const stacks=[...others,option];
+            if(!validateLayout(stacks,this.trailer).ok)continue;
+            const key=stateKey(stacks);if(globalSeen.has(key))continue;globalSeen.add(key);
+            next.push({stacks,moves:[...state.moves,{type:'move',id:piece.id,from:{x:piece.x,y:piece.y,w:piece.w,l:piece.l},to:{x:option.x,y:option.y,w:option.w,l:option.l}}]});
+          }
+          if(isFourWay(piece)&&piece.canRotate!==false&&Math.abs(piece.w-piece.l)>EPS){
+            const rotated={...piece,w:piece.l,l:piece.w,rotated:!piece.rotated};
+            for(const option of this.placementOptions(rotated,others,12).filter(c=>!samePose(c,piece)).slice(0,4)){
+              const stacks=[...others,option];if(!validateLayout(stacks,this.trailer).ok)continue;
+              const key=stateKey(stacks);if(globalSeen.has(key))continue;globalSeen.add(key);
+              next.push({stacks,moves:[...state.moves,{type:'rotate-move',id:piece.id,to:{x:option.x,y:option.y,w:option.w,l:option.l}}]});
+            }
+          }
+        }
+        // Intercambios virtuales entre piezas: se validan como una sola secuencia.
+        for(let i=0;i<Math.min(8,movable.length);i++)for(let j=i+1;j<Math.min(8,movable.length);j++){
+          if(!this.hasTime())break;
+          const a=movable[i],b=movable[j],others=state.stacks.filter(s=>s.id!==a.id&&s.id!==b.id);
+          const posesA=this.orientations(a).map(x=>({...x,x:b.x,y:b.y}));
+          const posesB=this.orientations(b).map(x=>({...x,x:a.x,y:a.y}));
+          for(const na of posesA)for(const nb of posesB){
+            if(!Geometry.valid(na,others,this.trailer)||!Geometry.valid(nb,[...others,na],this.trailer))continue;
+            const stacks=[...others,na,nb],key=stateKey(stacks);if(globalSeen.has(key))continue;globalSeen.add(key);
+            next.push({stacks,moves:[...state.moves,{type:'swap',ids:[a.id,b.id]}]});
+          }
+        }
+      }
+      const ranked=[];
+      for(const state of next){
+        const rescued=tryPending(state.stacks);
+        if(rescued){
+          const ev=evaluate(rescued.stacks);
+          if(ev.pallets>baselinePallets||ev.missing.length<pending.length){
+            candidates.push({name:`Simulación de movimientos · ${state.moves.length} pasos`,family:'Simulación',stacks:rescued.stacks,unplaced:ev.missing,simulatedMoves:state.moves});
+            if(!ev.missing.length)return candidates;
+          }
+        }
+        ranked.push({state,rank:evaluate(state.stacks).rank});
+      }
+      ranked.sort((a,b)=>b.rank-a.rank);
+      beam=[];const localSeen=new Set();
+      for(const item of ranked){const key=stateKey(item.state.stacks);if(localSeen.has(key))continue;localSeen.add(key);beam.push(item.state);if(beam.length>=beamWidth)break;}
+      if(!beam.length)break;
+    }
+    return candidates;
+  }
+
   compactPendingRescue(placed,unplaced,originals){
     // Paso final: compactar primero y volver a probar todas las pendientes en
     // los huecos reales antes de recurrir a reconstrucciones grandes.
@@ -837,6 +984,26 @@ class LoadEngine {
         const compacted=this.compactPendingRescue(seed.s.stacks,seed.missing,input);
         if(compacted)solutions.push(compacted);
         if(compacted&&!(compacted.unplaced||[]).length)break;
+      }
+    }
+
+    // Simulación de movimientos: ensaya secuencias de traslados, giros e
+    // intercambios sobre copias invisibles de las mejores cargas parciales.
+    // Solo agrega una candidata cuando la secuencia completa mejora el resultado.
+    if(this.hasTime()){
+      const simulationSeeds=solutions.map(s=>{
+        const ids=new Set((s.stacks||[]).map(x=>x.id));
+        const missing=input.filter(x=>!ids.has(x.id));
+        const pallets=(s.stacks||[]).reduce((sum,x)=>sum+(Number(x.qty)||1),0);
+        return {s,missing,pallets};
+      }).filter(x=>x.missing.length>0&&x.missing.length<=4)
+        .sort((a,b)=>b.pallets-a.pallets||b.s.stacks.length-a.s.stacks.length)
+        .slice(0,3);
+      for(const seed of simulationSeeds){
+        if(!this.hasTime())break;
+        const simulated=this.simulateMovementSequences(seed.s.stacks,seed.missing,input,{maxDepth:3,beamWidth:24});
+        for(const candidate of simulated)solutions.push(candidate);
+        if(simulated.some(x=>!(x.unplaced||[]).length))break;
       }
     }
 
