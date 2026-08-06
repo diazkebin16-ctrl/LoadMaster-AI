@@ -1,10 +1,11 @@
-# LoadMaster AI v5.40 NORMAL FIRST — actualización corregida
+# LoadMaster AI v5.38 PRESTACK ANYTIME
 
-Esta compilación corrige la actualización en GitHub Pages:
-- todas las referencias muestran v5.40;
-- recursos CSS y JS llevan versión propia;
-- el service worker usa red primero para la página;
-- se eliminan cachés LoadMaster antiguas al detectar la nueva versión;
-- el registro del service worker evita la caché HTTP.
+Base real: v5.36 STACK FIRST suministrada por el usuario.
 
-Después de subir todos los archivos, abre una vez la dirección agregando `?v=5391` al final.
+## Cambios
+- Buscar apilamiento está disponible antes de optimizar.
+- Antes de optimizar forma pilas mixtas y conserva el total de pallets.
+- Después de optimizar intenta primero aprovechar capacidad vertical sin mover el piso.
+- Si eso no basta, prueba reconstrucción apilada y solo la aplica si carga más pallets.
+- Las pilas nuevas se autoacomodan suavemente en el primer espacio válido; las que no caben pasan a pendientes.
+- El plano anterior se restaura si una prueba de apilamiento falla o no mejora.

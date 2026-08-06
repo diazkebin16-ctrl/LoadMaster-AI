@@ -5,35 +5,22 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
 <meta content="#111827" name="theme-color"/>
-<title>LoadMaster AI 5.40 — PRESTACK COUNT FIX</title>
+<title>LoadMaster AI 5.38 — PRESTACK ANYTIME</title>
 <link href="manifest.webmanifest" rel="manifest"/>
-<script>
-(function(){
-  const RELEASE="5.40";
-  const key="loadmaster-release";
-  try {
-    if(localStorage.getItem(key)!==RELEASE){
-      localStorage.setItem(key,RELEASE);
-      if("caches" in window) caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith("loadmaster-ai-")).map(k=>caches.delete(k))));
-      if("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(r=>r.unregister())));
-    }
-  } catch(e){}
-})();
-</script>
-<link href="styles.css?v=5.40" rel="stylesheet"/>
+<link href="styles.css" rel="stylesheet"/>
 </head>
 <body>
 <header class="topbar">
 <div>
 <h1>LoadMaster AI</h1>
-<p>Engine v14 · acomodo normal primero · apilamiento solo si hace falta · v5.40</p>
+<p>Engine v14 · acomodo normal primero · apilamiento previo opcional · v5.38</p>
 </div>
 <div class="topbarActions">
 <label class="themePicker" for="themeSelect"><span>Tema</span><select id="themeSelect" aria-label="Tema de la aplicación"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label>
 <button class="primary" hidden="" id="installBtn">Instalar</button>
 </div>
 </header>
-<main class="app"><aside class="sidebar sidebarTop"><section class="card versionCard"><strong>v5.40 NORMAL FIRST</strong> · Primero intenta acomodar toda la carga sin apilar. Buscar apilamiento se habilita únicamente después de optimizar cuando todavía quedan pallets pendientes.</section><details class="card collapsibleCard accordionPanel" id="trailerSettings">
+<main class="app"><aside class="sidebar sidebarTop"><section class="card versionCard"><strong>v5.38 PRESTACK ANYTIME</strong> · Autoacomoda suavemente las pilas nuevas. Buscar apilamiento funciona antes de optimizar para preparar pilas mixtas y después para aprovechar capacidad vertical.</section><details class="card collapsibleCard accordionPanel" id="trailerSettings">
 <summary><span>Configuración del tráiler</span><small id="trailerSummary">96 × 628 pulg.</small></summary>
 <div class="detailsBody">
 <label>Modelo guardado
@@ -91,7 +78,7 @@
 </div>
 <div class="progressiveStatus active" id="progressiveStatus" hidden><span class="progressivePulse" aria-hidden="true"></span><span id="progressiveStatusText">Preparando optimización progresiva…</span><button id="stopProgressiveBtn" type="button">Detener búsqueda</button></div><div class="progressiveOffer" id="progressiveOffer" hidden><strong>La IA encontró una mejora</strong><p id="progressiveOfferText"></p><div class="progressiveOfferActions"><button class="primary" id="applyProgressiveBtn" type="button">Aplicar mejora</button><button id="compareProgressiveBtn" type="button">Ver comparación</button><button id="ignoreProgressiveBtn" type="button">Ignorar</button></div></div><div class="optimizerResults" id="optimizerResults"></div>
 <section class="pendingSection">
-<div class="pendingHeader"><strong>Carga pendiente (<span id="pendingCount">0</span>)</strong><span><button id="retryPendingBtn" type="button">Reintentar</button><button id="clearPendingBtn" type="button">Eliminar pendientes</button></span></div><div class="stackingStatus" id="stackingStatus">Primero ejecuta Optimización IA sin apilar.</div>
+<div class="pendingHeader"><strong>Carga pendiente (<span id="pendingCount">0</span>)</strong><span><button id="retryPendingBtn" type="button">Reintentar</button><button id="clearPendingBtn" type="button">Eliminar pendientes</button></span></div><div class="stackingStatus" id="stackingStatus">El apilamiento solo se ejecuta cuando tú pulsas “Buscar apilamiento”.</div>
 <div class="pendingList" id="pendingList"><div class="pendingEmpty">No hay pilas pendientes.</div></div>
 </section>
 </section>
@@ -308,6 +295,6 @@
 </form>
 </dialog>
 <div aria-live="polite" class="toast" id="toast"></div>
-<script defer="" src="app.js?v=5.40"></script>
+<script defer="" src="app.js?v=5.36-stack-first"></script>
 </body>
 </html>
