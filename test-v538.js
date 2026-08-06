@@ -1,15 +1,19 @@
-const fs=require('fs');
-const app=fs.readFileSync('app.js','utf8');
+const fs=require('fs'),vm=require('vm');
+let code=fs.readFileSync('app.js','utf8').replace(/new App\(\);\s*$/m,'');
+const context={console,setTimeout,clearTimeout,structuredClone:global.structuredClone,crypto:{randomUUID:()=>Math.random().toString(36)},localStorage:{getItem:()=>null,setItem:()=>{}},sessionStorage:{getItem:()=>null,setItem:()=>{}},navigator:{onLine:true},window:{matchMedia:()=>({matches:false,addEventListener(){}})},document:{readyState:'complete',documentElement:{dataset:{}},getElementById:()=>null,querySelector:()=>null,addEventListener(){}}};
+vm.createContext(context);vm.runInContext(code,context);
+const prepared=vm.runInContext(`buildStackingFirstLoad(
+ [{id:'b',name:'42x42',w:42,l:42,qty:6,maxHeight:21,type:'2-way',canRotate:false,x:0,y:0}],
+ [{id:'u',name:'42x34 Block',w:42,l:34,qty:10,maxHeight:16,type:'4-way',canRotate:true,x:0,y:0}],
+ [],'balanced')`,context);
+const total=prepared.reduce((n,s)=>n+(Number(s.qty)||1),0);
+if(total!==16)throw new Error('se perdieron pallets al preparar: '+total);
+const mixed=prepared.find(s=>Array.isArray(s.layers)&&s.layers.length===2);
+if(!mixed)throw new Error('no creó pila mixta antes de optimizar');
+if(mixed.qty>16)throw new Error('no respetó límite menor');
 const html=fs.readFileSync('index.html','utf8');
-const sw=fs.readFileSync('sw.js','utf8');
-function ok(v,m){if(!v)throw new Error(m)}
-ok(html.includes('v5.38 PRESTACK ANYTIME'),'versión visual incorrecta');
-ok(!html.includes('id="stackAssistBtn" type="button" disabled'),'el botón sigue deshabilitado en HTML');
-ok(app.includes('if(!this.hasOptimized)'),'falta el modo previo a optimizar');
-ok(app.includes('mixedStackingPlan(before.stacks,before.pending'),'falta capacidad vertical posterior');
-ok(app.includes('findFirstValidPlacement'),'falta autoacomodo al agregar');
-ok(app.includes("this.hasOptimized=false;this.lastWinningStrategy='Manual / sin optimizar'"),'agregar pallets no reinicia el modo previo');
-ok(app.includes('preparedTotal!==totalPallets'),'falta protección de conservación de pallets');
-ok(app.includes('(best.loadedPallets||0)<=baselinePallets'),'falta protección del plano normal');
-ok(sw.includes('loadmaster-ai-v5.38-prestack-anytime'),'caché incorrecta');
-console.log('PASS v5.38: apilamiento antes/después y autoacomodo suave.');
+if(/id="stackAssistBtn"[^>]*disabled/.test(html))throw new Error('botón sigue bloqueado antes de optimizar');
+if(!code.includes('prepareMixedStacksBeforeOptimization'))throw new Error('falta flujo previo');
+if(!code.includes('if(!hasOptimizedPlan)return this.prepareMixedStacksBeforeOptimization()'))throw new Error('no cambia de modo antes/después');
+if(!code.includes('this.lastSolutions=[];this.lastOptimizationMs=0;this.lastWinningStrategy="Manual / sin optimizar"'))throw new Error('agregar carga no reinicia estado de optimización');
+console.log('v5.38 pre-stack before/after optimization: OK');
