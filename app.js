@@ -1330,7 +1330,7 @@ function normalizeLibraryItem(raw={}){
   class App {
     constructor(){
       this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null;
-      this.bind(); this.syncTrailerInputs(); this.render();
+      this.bind(); this.syncTrailerInputs(); this.restoreTrailerPanelState(); this.render();
       if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
     }
     get state(){return this.store.state;}
@@ -1341,12 +1341,13 @@ function normalizeLibraryItem(raw={}){
     bind(){
       window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();this.installPrompt=e;$("installBtn").hidden=false;});
       $("installBtn").onclick=async()=>{if(!this.installPrompt)return;this.installPrompt.prompt();await this.installPrompt.userChoice;this.installPrompt=null;$("installBtn").hidden=true;};
-      $("trailerPreset").onchange=e=>{const v=PRESETS[e.target.value];if(v){$("trailerWidth").value=v[0];$("trailerLength").value=v[1];$("trailerAutofillStatus").textContent=`✓ Tráiler autocompletado: ${v[1]} largo × ${v[0]} ancho`;}};
-      $("applyTrailer").onclick=()=>{this.store.remember();this.state.trailer={width:+$("trailerWidth").value||96,length:+$("trailerLength").value||628};this.render();};
+      $("trailerPreset").onchange=e=>{const v=PRESETS[e.target.value];if(v){$("trailerWidth").value=v[0];$("trailerLength").value=v[1];$("trailerAutofillStatus").textContent=`✓ Tráiler autocompletado: ${v[1]} largo × ${v[0]} ancho`;this.updateTrailerSummary(v[0],v[1]);}};
+      $("trailerSettings").addEventListener("toggle",()=>localStorage.setItem("lm_trailer_panel_open",$("trailerSettings").open?"1":"0"));
+      $("applyTrailer").onclick=()=>{this.store.remember();this.state.trailer={width:+$("trailerWidth").value||96,length:+$("trailerLength").value||628};this.updateTrailerSummary();this.render();};
       $("librarySelect").onchange=()=>this.loadLibrarySelection();
       $("saveLibrary").onclick=()=>this.saveLibraryItem();
       $("newCatalogItem").onclick=()=>this.openCatalogEditor();
-      $("catalogSearch").oninput=()=>this.renderCatalog();
+      $("catalogSearch").oninput=()=>this.renderLibrary();
       $("exportCatalog").onclick=()=>this.exportCatalog();
       $("importCatalog").onclick=()=>$("catalogImportInput").click();
       $("catalogImportInput").onchange=e=>this.importCatalog(e);
@@ -1370,6 +1371,9 @@ function normalizeLibraryItem(raw={}){
       $("analyzePatternBtn").onclick=()=>this.analyzeCurrentRows();
       $("trailer").onclick=e=>{if(e.target===$("trailer")||e.target.classList.contains("freeZone")){this.state.selectedId=null;this.render();}};
     }
+
+    restoreTrailerPanelState(){const panel=$("trailerSettings");if(!panel)return;panel.open=localStorage.getItem("lm_trailer_panel_open")==="1";this.updateTrailerSummary();}
+    updateTrailerSummary(width=this.state.trailer.width,length=this.state.trailer.length){const el=$("trailerSummary");if(el)el.textContent=`${Number(width)||0} × ${Number(length)||0} pulg.`;}
 
     loadReferenceImage(e){
       const file=e.target.files&&e.target.files[0];
@@ -1478,9 +1482,10 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.18",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.19",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
-    renderCatalog(){const root=$("catalogList");if(!root)return;const q=($("catalogSearch")?.value||"").trim().toLowerCase();const items=[...this.state.library].sort((a,b)=>Number(b.favorite)-Number(a.favorite)||a.name.localeCompare(b.name)).filter(x=>!q||`${x.name} ${x.l}x${x.w} ${x.type} ${x.category} ${x.notes}`.toLowerCase().includes(q));root.innerHTML="";if(!items.length){root.innerHTML='<div class="catalogEmpty">No hay pallets que coincidan.</div>';return;}for(const item of items){const row=document.createElement("article");row.className=`catalogItem${item.favorite?" favorite":""}`;row.innerHTML=`<div class="catalogItemTop"><div><strong></strong><small></small></div><button data-fav type="button" title="Favorito">${item.favorite?"★":"☆"}</button></div><div class="catalogActions"><button data-use type="button">Usar</button><button data-edit type="button">Editar</button><button data-copy type="button">Duplicar</button><button data-delete type="button">Eliminar</button></div>`;row.querySelector("strong").textContent=item.name;row.querySelector("small").textContent=`${item.l} largo × ${item.w} ancho · altura ${item.maxHeight} · ${item.type} · ${item.category}${item.notes?" · "+item.notes:""}`;row.querySelector("[data-fav]").onclick=()=>this.toggleCatalogFavorite(item.id);row.querySelector("[data-use]").onclick=()=>{$("librarySelect").value=item.id;this.loadLibrarySelection();window.scrollTo({top:0,behavior:"smooth"});};row.querySelector("[data-edit]").onclick=()=>this.openCatalogEditor(item.id);row.querySelector("[data-copy]").onclick=()=>this.duplicateCatalogItem(item.id);row.querySelector("[data-delete]").onclick=()=>this.deleteCatalogItem(item.id);root.appendChild(row);}}
+    renderCatalog(){this.renderLibrary();}
+
 
     splitQty(total,max){const r=[];while(total>0){const n=Math.min(total,max);r.push(n);total-=n;}return r;}
     addPallets(){
@@ -1584,7 +1589,7 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.18",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.18.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.18",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.19.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
@@ -1627,7 +1632,7 @@ function normalizeLibraryItem(raw={}){
       }catch(error){if(error?.name!=="AbortError")this.toast(error.message||"No se pudo compartir el reporte");}
     }
     async openFile(e){const file=e.target.files[0];if(!file)return;try{const d=JSON.parse(await file.text());this.store.remember();this.state.trailer=d.trailer||this.state.trailer;this.state.stacks=d.stacks||[];this.state.pending=d.pending||[];this.state.library=(d.library||this.state.library).map(normalizeLibraryItem);this.state.selectedId=null;this.store.persistLibrary();this.syncTrailerInputs();this.render();this.toast("Carga abierta");}catch{this.toast("Archivo no válido");}e.target.value="";}
-    renderLibrary(){const sel=$("librarySelect"),current=sel.value;sel.innerHTML='<option value="">— Nueva medida —</option>';this.state.library.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.name} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;}
+    renderLibrary(){const sel=$("librarySelect"),current=sel.value,q=($("catalogSearch")?.value||"").trim().toLowerCase();sel.innerHTML='<option value="">— Nueva medida —</option>';const items=[...this.state.library].sort((a,b)=>Number(b.favorite)-Number(a.favorite)||a.name.localeCompare(b.name)).filter(item=>!q||`${item.name} ${item.l}x${item.w} ${item.type} ${item.category} ${item.notes||""}`.toLowerCase().includes(q));items.forEach(item=>{const o=document.createElement("option");o.value=item.id;o.textContent=`${item.favorite?"★ ":""}${item.name} · ${item.l}×${item.w} · ${item.type} · máx ${item.maxHeight}`;sel.appendChild(o);});if([...sel.options].some(o=>o.value===current))sel.value=current;const status=$("catalogSearchStatus");if(status)status.textContent=q?`${items.length} medida${items.length===1?"":"s"} coincide${items.length===1?"":"n"}. Selecciónala en Biblioteca.`:`${this.state.library.length} medida${this.state.library.length===1?"":"s"} guardada${this.state.library.length===1?"":"s"}. Usa Biblioteca para seleccionar y editar.`;}
     render(){
       const trailer=$("trailer");trailer.style.width=`${this.state.trailer.width*SCALE}px`;trailer.style.height=`${this.state.trailer.length*SCALE}px`;trailer.querySelectorAll(".stack").forEach(n=>n.remove());
       this.state.stacks.forEach(s=>{const el=document.createElement("div");el.className="stack"+(s.id===this.state.selectedId?" selected":"")+(s.locked?" locked":"")+(this.valid(s)?"":" invalid");el.dataset.id=s.id;el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.style.width=`${s.w*SCALE}px`;el.style.height=`${s.l*SCALE}px`;el.innerHTML=`${s.name}<small>${s.qty} alto · ${s.type}</small>`;trailer.appendChild(el);this.wireDrag(el,s);});

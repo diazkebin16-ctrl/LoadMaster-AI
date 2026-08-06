@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 5.18 — VISUAL HISTORY</title>
+  <title>LoadMaster AI 5.19 — CLEAN WORKSPACE</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,16 +12,17 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>Engine v10 · historial visual, últimos 10 y aprendizaje protegido · v5.18</p>
+    <p>Engine v10 · interfaz compacta y espacio de trabajo ampliado · v5.19</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
 
 <main class="app">
   <aside class="sidebar">
-    <section class="card versionCard"><strong>v5.18 VISUAL HISTORY</strong> · Historial manual, últimas 10 optimizaciones y aprendizaje interno protegido.</section>
-    <section class="card">
-      <h2>Tráiler</h2>
+    <section class="card versionCard"><strong>v5.19 CLEAN WORKSPACE</strong> · Configuración compacta, catálogo simplificado y plano con más espacio.</section>
+    <details id="trailerSettings" class="card collapsibleCard">
+      <summary><span>Configuración del tráiler</span><small id="trailerSummary">96 × 628 pulg.</small></summary>
+      <div class="detailsBody">
       <label>Modelo guardado
         <select id="trailerPreset">
           <option value="96x628" selected>96×628</option>
@@ -44,7 +45,8 @@
         </label>
       </div>
       <button id="applyTrailer">Aplicar</button>
-    </section>
+      </div>
+    </details>
 
     <section class="card">
       <h2>Agregar pallet</h2>
@@ -97,20 +99,21 @@
     </section>
 
 
-    <section class="card">
+    <section class="card compactCatalogCard">
       <div class="catalogHeader">
-        <div><h2>Catálogo de pallets</h2><p class="cardHelp">Edita, duplica, elimina, busca o marca favoritos.</p></div>
-        <button id="newCatalogItem" type="button">Nuevo</button>
+        <div><h2>Catálogo de pallets</h2><p class="cardHelp">Administra el catálogo sin repetir la lista del selector “Biblioteca”.</p></div>
+        <button id="newCatalogItem" type="button">Agregar nuevo</button>
       </div>
-      <label>Buscar
+      <label>Buscar en medidas guardadas
         <input id="catalogSearch" type="search" placeholder="Nombre, medida, tipo o categoría">
+        <small id="catalogSearchStatus" class="cardHelp">La búsqueda filtra el selector Biblioteca de arriba.</small>
       </label>
       <div class="catalogToolbar">
         <button id="exportCatalog" type="button">Exportar catálogo</button>
         <button id="importCatalog" type="button">Importar catálogo</button>
       </div>
       <input id="catalogImportInput" type="file" accept="application/json,.json" hidden>
-      <div id="catalogList" class="catalogList"></div>
+      <div id="catalogList" hidden></div>
     </section>
 
     <section class="card visualLearningCard">
@@ -134,16 +137,13 @@
       <p class="privacyNote">La imagen no se sube a internet. Solo se guarda el patrón geométrico confirmado.</p>
     </section>
 
-    <section class="card">
-      <h2>Pila seleccionada</h2>
-      <div id="selectedInfo" class="selectedInfo">Ninguna seleccionada</div>
-      <div class="buttonGrid">
-        <button id="rotateBtn">Girar</button>
-        <button id="lockBtn">Bloquear</button>
-        <button id="duplicateBtn">Duplicar</button>
-        <button id="deleteBtn">Eliminar</button>
-      </div>
-    </section>
+    <div class="compatibilityControls" hidden aria-hidden="true">
+      <div id="selectedInfo">Ninguna seleccionada</div>
+      <button id="rotateBtn" type="button">Girar</button>
+      <button id="lockBtn" type="button">Bloquear</button>
+      <button id="duplicateBtn" type="button">Duplicar</button>
+      <button id="deleteBtn" type="button">Eliminar</button>
+    </div>
 
     <section class="card">
       <h2>Herramientas</h2>
@@ -265,7 +265,7 @@
 
 
 <div id="floatingTools" class="bottomTools" hidden>
-  <div id="bottomSelectedName" class="bottomSelectedName">Pila seleccionada</div>
+  <div id="bottomSelectedName" hidden></div>
   <div class="bottomToolButtons">
     <button id="floatRotateBtn" class="floatPrimary" type="button">↻ Girar</button>
     <button id="floatLockBtn" type="button">🔒 Bloq.</button>
@@ -294,6 +294,6 @@
 
 <div id="toast" class="toast" aria-live="polite"></div>
 
-<script defer src="app.js?v=5.18-visual-history"></script>
+<script defer src="app.js?v=5.19-clean-workspace"></script>
 </body>
 </html>

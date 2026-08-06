@@ -241,3 +241,17 @@ body{padding-bottom:92px}
 
 /* v5.18 visual history */
 .historyHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.historyHeader h2{margin-bottom:4px}.visualHistoryCard h3{margin:18px 0 8px;font-size:.95rem;color:#374151}.historyList{display:grid;gap:10px}.historyItem{display:grid;grid-template-columns:86px minmax(0,1fr);gap:10px;padding:10px;border:1px solid #d1d5db;border-radius:12px;background:#fff}.historyThumb{width:86px;height:110px;object-fit:cover;border-radius:8px;border:1px solid #d1d5db;background:#eef1f5}.historyMeta strong{display:block;margin-bottom:3px}.historyMeta small{display:block;color:#6b7280;line-height:1.35}.historyActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.historyActions button{font-size:.76rem;padding:6px 8px}.historyFavorite{color:#b45309}.historyEmpty{padding:12px;border:1px dashed #cbd5e1;border-radius:10px;color:#6b7280;text-align:center}.advancedSettings{margin-top:18px;padding:10px;border:1px solid #d1d5db;border-radius:10px;background:#f9fafb}.advancedSettings summary{cursor:pointer;font-weight:700}.advancedSettings p{font-size:.82rem;color:#6b7280}.advancedSettings .subtleDanger{margin-top:4px}@media(max-width:600px){.historyHeader{display:block}.historyHeader button{width:100%;margin-top:8px}.historyItem{grid-template-columns:72px minmax(0,1fr)}.historyThumb{width:72px;height:96px}}
+
+/* v5.19 CLEAN WORKSPACE */
+.collapsibleCard{padding:0;overflow:hidden}
+.collapsibleCard>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;cursor:pointer;font-weight:800;list-style:none;user-select:none}
+.collapsibleCard>summary::-webkit-details-marker{display:none}
+.collapsibleCard>summary::after{content:"▾";font-size:14px;transition:transform .18s ease}
+.collapsibleCard:not([open])>summary::after{transform:rotate(-90deg)}
+.collapsibleCard>summary small{margin-left:auto;font-weight:600;opacity:.72}
+.collapsibleCard .detailsBody{padding:0 16px 16px}
+.compactCatalogCard .catalogHeader{align-items:center}
+.compactCatalogCard .catalogToolbar{margin-top:8px}
+.compatibilityControls{display:none!important}
+.bottomTools .bottomSelectedName[hidden]{display:none!important}
+.bottomTools:has(.bottomSelectedName[hidden]){grid-template-columns:1fr}
