@@ -2031,7 +2031,7 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.38",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.39",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
@@ -2060,76 +2060,96 @@ function normalizeLibraryItem(raw={}){
     undo(){if(!this.store.history.length)return;this.store.future.push(this.store.snapshot());this.store.restore(this.store.history.pop());this.syncTrailerInputs();this.render();}
     redo(){if(!this.store.future.length)return;this.store.history.push(this.store.snapshot());this.store.restore(this.store.future.pop());this.syncTrailerInputs();this.render();}
     async searchMixedStacking(){
-      const allCount=(this.state.stacks||[]).length+(this.state.pending||[]).length;
-      if(!allCount)return this.toast('No hay carga para preparar o apilar');
+      const status=$("stackingStatus"),button=$("stackAssistBtn");
+      if(!this.hasOptimized){
+        if(status)status.textContent="Primero ejecuta Optimización IA sin apilar.";
+        return this.toast("Primero intenta acomodar toda la carga sin apilar");
+      }
+      if(!(this.state.pending||[]).length){
+        if(status)status.textContent="La carga ya está completa; no hay pendientes para apilar.";
+        return this.toast("No hay carga pendiente para apilar");
+      }
       if(this.progressiveSession)this.stopProgressiveOptimization(true);
-      const status=$('stackingStatus'),button=$('stackAssistBtn');if(button)button.disabled=true;
+      if(button)button.disabled=true;
       const before=clone({stacks:this.state.stacks,pending:this.state.pending,selectedId:this.state.selectedId,hasOptimized:this.hasOptimized});
       const baselinePallets=before.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0);
-      const totalPallets=baselinePallets+before.pending.reduce((n,s)=>n+(Number(s.qty)||1),0);
       try{
-        // Antes de optimizar: forma pilas mixtas y deja la carga preparada.
-        if(!this.hasOptimized){
-          if(status)status.textContent='Preparando pilas mixtas antes de optimizar…';
-          await new Promise(r=>setTimeout(r,40));
-          const profiles=['balanced','tight','upper-heavy','base-heavy','large-base'];
-          let best=null;
-          for(const profile of profiles){
-            const input=buildStackingFirstLoad(before.stacks,before.pending,this.state.library,profile);
-            const mixedCount=input.filter(s=>Array.isArray(s.layers)&&s.layers.length>1).length;
-            if(!mixedCount)continue;
-            const preview=preparePreviewLayout(input,this.state.trailer);
-            const candidate={profile,input,preview,mixedCount,stackCount:input.length,pendingCount:preview.pending.length};
-            if(!best||candidate.pendingCount<best.pendingCount||candidate.pendingCount===best.pendingCount&&candidate.stackCount<best.stackCount||candidate.pendingCount===best.pendingCount&&candidate.stackCount===best.stackCount&&candidate.mixedCount>best.mixedCount)best=candidate;
-          }
-          if(!best){if(status)status.textContent='No se encontraron combinaciones verticales compatibles.';return this.toast('No hay medidas compatibles para apilar antes de optimizar');}
-          const preparedTotal=best.input.reduce((n,s)=>n+(Number(s.qty)||1),0);
-          if(preparedTotal!==totalPallets)throw new Error('La preparación no conservó la cantidad total de pallets');
-          this.store.remember();this.state.stacks=clone(best.preview.placed);this.state.pending=clone(best.preview.pending);this.state.selectedId=null;this.lastStackingResult={mode:'prestack',profile:best.profile,mixedCount:best.mixedCount};this.lastWinningStrategy='Pilas mixtas preparadas';this.render();
-          if(status)status.textContent=`Se prepararon ${best.mixedCount} pila${best.mixedCount===1?'':'s'} mixta${best.mixedCount===1?'':'s'}. Ahora pulsa Optimización IA.`;
-          return this.toast('Apilamiento previo preparado; ahora puedes optimizar');
-        }
-
-        if(!(before.pending||[]).length){if(status)status.textContent='La carga ya está completa; no hay pendientes para apilar.';return this.toast('No hay carga pendiente para apilar');}
-        // Después de optimizar: primero usa capacidad vertical sin mover el piso.
-        if(status)status.textContent='Revisando capacidad vertical disponible…';
+        // Segundo recurso: primero aprovecha capacidad vertical sin mover el piso.
+        if(status)status.textContent="La carga normal dejó pendientes. Revisando capacidad vertical disponible…";
         await new Promise(r=>setTimeout(r,40));
         const vertical=mixedStackingPlan(before.stacks,before.pending,this.state.library,this.state.trailer);
         const verticalLoaded=vertical.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0);
         if(vertical.ok&&vertical.stackedPallets>0&&verticalLoaded>baselinePallets){
-          this.store.remember();this.state.stacks=clone(vertical.stacks);this.state.pending=clone(vertical.pending);this.state.selectedId=null;this.lastStackingResult={mode:'vertical-capacity',...vertical};this.lastWinningStrategy='Capacidad vertical';this.render();
+          this.store.remember();
+          this.state.stacks=clone(vertical.stacks);
+          this.state.pending=clone(vertical.pending);
+          this.state.selectedId=null;
+          this.hasOptimized=true;
+          this.lastStackingResult={mode:"vertical-capacity",...vertical};
+          this.lastWinningStrategy="Capacidad vertical después del acomodo normal";
+          this.render();
           const gained=verticalLoaded-baselinePallets;
-          if(status)status.textContent=`Se aprovecharon ${gained} pallets de capacidad vertical sin reorganizar el piso.`;
-          return this.toast(`Capacidad vertical aplicada: ${gained} pallet${gained===1?'':'s'} adicional${gained===1?'':'es'}`);
+          if(status)status.textContent=`Apilamiento aplicado después del acomodo normal: ${gained} pallet${gained===1?"":"s"} adicional${gained===1?"":"es"}.`;
+          return this.toast(`Apilamiento aplicado: ${gained} pallet${gained===1?"":"s"} adicional${gained===1?"":"es"}`);
         }
 
-        // Si no alcanzó, reconstruye desde las cantidades originales y compara.
-        if(status)status.textContent='La capacidad vertical no bastó; probando apilar primero y volver a acomodar…';
-        const profiles=['tight','balanced','upper-heavy','base-heavy','large-base'],candidates=[];
+        // Si la capacidad vertical directa no basta, reconstruye desde las cantidades originales,
+        // pero únicamente como alternativa posterior al intento normal.
+        if(status)status.textContent="La capacidad directa no bastó. Probando una reconstrucción con bases grandes abajo…";
+        await new Promise(r=>setTimeout(r,40));
+        const profiles=["balanced","tight","upper-heavy","base-heavy","large-base"];
+        const candidates=[];
         for(let i=0;i<profiles.length;i++){
-          if(status)status.textContent=`Probando reconstrucción apilada ${i+1} de ${profiles.length}…`;
-          await new Promise(r=>setTimeout(r,25));
           const input=buildStackingFirstLoad(before.stacks,before.pending,this.state.library,profiles[i]);
-          const mixedCount=input.filter(s=>Array.isArray(s.layers)&&s.layers.length>1).length;if(!mixedCount)continue;
-          const engine=new LoadEngine(this.state.trailer,{timeLimitMs:Math.max(2200,Math.floor(11500/profiles.length)),patterns:[],strategies:[]});
-          const report=engine.optimize(clone(input));if(!report.ok)continue;
-          for(const sol of (report.solutions||[]).slice(0,2)){if(!validateLayout(sol.stacks,this.state.trailer).ok)continue;candidates.push({...sol,name:`Apilar primero · ${profiles[i]}`,family:'Apilamiento previo',stackingProfile:profiles[i],mixedCount});}
+          const mixedCount=input.filter(s=>Array.isArray(s.layers)&&s.layers.length>1).length;
+          if(!mixedCount)continue;
+          const report=await Optimizer.optimizeDeep(input,this.state.trailer,{totalMs:5000,quickMs:1200,seed:Date.now()+i*977});
+          for(const sol of (report.solutions||[]).slice(0,2)){
+            if(!validateLayout(sol.stacks,this.state.trailer).ok)continue;
+            candidates.push({...sol,name:`Apilar después · ${profiles[i]}`,family:"Apilamiento posterior",stackingProfile:profiles[i],mixedCount});
+          }
         }
-        candidates.sort((a,b)=>(b.loadedPallets||0)-(a.loadedPallets||0)||(b.loadedStacks||0)-(a.loadedStacks||0)||(a.unplacedPallets||0)-(b.unplacedPallets||0)||(a.used||Infinity)-(b.used||Infinity));
+        candidates.sort((a,b)=>(b.loadedPallets||0)-(a.loadedPallets||0)||(a.unplaced?.length||0)-(b.unplaced?.length||0)||(a.usedLength||Infinity)-(b.usedLength||Infinity));
         const best=candidates[0];
-        if(!best||(best.loadedPallets||0)<=baselinePallets){this.state.stacks=before.stacks;this.state.pending=before.pending;this.state.selectedId=before.selectedId;this.hasOptimized=before.hasOptimized;this.render();if(status)status.textContent='El acomodo normal sigue siendo mejor; no se cambió el plano.';return this.toast('El apilamiento no logró cargar más pallets; se conservó el plano normal');}
-        const validation=validateLayout(best.stacks,this.state.trailer);if(!validation.ok)throw new Error(explainValidation(validation));
-        this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.state.selectedId=null;this.hasOptimized=true;this.lastStackingResult=best;this.lastWinningStrategy='Apilamiento previo + optimización';this.lastOptimizationMs=0;this.render();
-        const gained=(best.loadedPallets||0)-baselinePallets,left=totalPallets-(best.loadedPallets||0);
-        if(status)status.textContent=left?`El apilamiento agregó ${gained} pallets; quedan ${left} pendientes.`:'Carga completa mediante apilamiento previo.';
-        this.toast(`Apilamiento aplicado: ${gained} pallet${gained===1?'':'s'} adicional${gained===1?'':'es'}`);
-      }catch(error){this.state.stacks=before.stacks;this.state.pending=before.pending;this.state.selectedId=before.selectedId;this.hasOptimized=before.hasOptimized;this.render();if(status)status.textContent='El apilamiento fue rechazado y el plano anterior se conservó.';this.toast(`No se pudo completar el apilamiento: ${error?.message||'error desconocido'}`);}finally{if(button)button.disabled=!((this.state.stacks||[]).length+(this.state.pending||[]).length);}
+        if(!best||(best.loadedPallets||0)<=baselinePallets){
+          this.state.stacks=before.stacks;
+          this.state.pending=before.pending;
+          this.state.selectedId=before.selectedId;
+          this.hasOptimized=before.hasOptimized;
+          this.render();
+          if(status)status.textContent="El acomodo normal sigue siendo mejor; no se cambió el plano.";
+          return this.toast("El apilamiento no logró cargar más pallets; se conservó el plano normal");
+        }
+        this.store.remember();
+        this.state.stacks=clone(best.stacks);
+        this.state.pending=clone(best.unplaced||[]);
+        this.state.selectedId=null;
+        this.hasOptimized=true;
+        this.lastStackingResult=best;
+        this.lastWinningStrategy="Apilamiento posterior + optimización";
+        this.lastOptimizationMs=0;
+        this.render();
+        const gained=(best.loadedPallets||0)-baselinePallets;
+        if(status)status.textContent=`La alternativa apilada cargó ${gained} pallet${gained===1?"":"s"} adicional${gained===1?"":"es"}.`;
+        this.toast(`Apilamiento aplicado: ${gained} pallet${gained===1?"":"s"} adicional${gained===1?"":"es"}`);
+      }catch(error){
+        this.state.stacks=before.stacks;
+        this.state.pending=before.pending;
+        this.state.selectedId=before.selectedId;
+        this.hasOptimized=before.hasOptimized;
+        this.render();
+        if(status)status.textContent="El apilamiento fue rechazado y el plano normal se conservó.";
+        this.toast(`No se pudo completar el apilamiento: ${error?.message||"error desconocido"}`);
+      }finally{
+        if(button)button.disabled=!(this.hasOptimized&&(this.state.pending||[]).length);
+      }
     }
 
     renderPending(){
       const root=$("pendingList"),count=$("pendingCount");if(!root||!count)return;
-      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";const stackBtn=$("stackAssistBtn");if(stackBtn)stackBtn.disabled=!((this.state.stacks||[]).length+pending.length);
-      if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';const status=$("stackingStatus");if(status)status.textContent=this.hasOptimized?"La carga no tiene pendientes para apilar.":"Puedes preparar pilas mixtas antes de pulsar Optimización IA.";return;}
+      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";const stackBtn=$("stackAssistBtn");if(stackBtn)stackBtn.disabled=!(this.hasOptimized&&pending.length);
+      if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';const status=$("stackingStatus");if(status)status.textContent=this.hasOptimized?"La carga no tiene pendientes para apilar.":"Primero ejecuta Optimización IA sin apilar.";return;}
+      {const status=$("stackingStatus");if(status)status.textContent=this.hasOptimized?"La carga normal dejó pendientes. Puedes usar Buscar apilamiento como segundo recurso.":"Primero ejecuta Optimización IA sin apilar.";}
       pending.forEach(s=>{const row=document.createElement("div");row.className="pendingItem";row.innerHTML=`<div><strong>${s.name}</strong><small>${s.w}×${s.l} · ${s.qty||1} pallets · máx ${libraryMaxHeightFor(s,this.state.library)} · ${s.type}</small></div><button type="button" data-edit>Editar</button>`;row.querySelector("[data-edit]").onclick=()=>this.editPending(s.id);root.appendChild(row);});
     }
     editPending(id){
@@ -2291,7 +2311,7 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.hasOptimized=false;this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.38",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.32.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.39",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.32.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);

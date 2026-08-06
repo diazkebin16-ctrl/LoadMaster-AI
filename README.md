@@ -1,11 +1,9 @@
-# LoadMaster AI v5.38 PRESTACK ANYTIME
+# LoadMaster AI v5.39 NORMAL FIRST
 
-Base real: v5.36 STACK FIRST suministrada por el usuario.
-
-## Cambios
-- Buscar apilamiento está disponible antes de optimizar.
-- Antes de optimizar forma pilas mixtas y conserva el total de pallets.
-- Después de optimizar intenta primero aprovechar capacidad vertical sin mover el piso.
-- Si eso no basta, prueba reconstrucción apilada y solo la aplica si carga más pallets.
-- Las pilas nuevas se autoacomodan suavemente en el primer espacio válido; las que no caben pasan a pendientes.
-- El plano anterior se restaura si una prueba de apilamiento falla o no mejora.
+- La optimización normal siempre se ejecuta primero, sin apilamiento.
+- Buscar apilamiento permanece desactivado antes de optimizar.
+- Solo se habilita si una optimización terminada deja pallets pendientes.
+- Primero aprovecha capacidad vertical sin mover el piso.
+- Solo después prueba una reconstrucción apilada.
+- Nunca reemplaza el plano normal si no carga más pallets.
+- Conserva autoacomodo suave, modo oscuro y funciones anteriores.
