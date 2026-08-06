@@ -353,6 +353,10 @@ body.manual-edit-mode .canvasWrap{overflow:hidden}
   --shadow:rgba(15,23,42,.16);
   --input-bg:#ffffff;
   --overlay:rgba(255,255,255,.98);
+  --badge-bg:#e5e7eb;
+  --badge-text:#1f2937;
+  --badge-border:#cbd5e1;
+  --soft-panel:#f8fafc;
 }
 html[data-theme="dark"]{
   color-scheme:dark;
@@ -375,6 +379,10 @@ html[data-theme="dark"]{
   --shadow:rgba(0,0,0,.45);
   --input-bg:#0f172a;
   --overlay:rgba(15,23,42,.98);
+  --badge-bg:#374151;
+  --badge-text:#f3f4f6;
+  --badge-border:#4b5563;
+  --soft-panel:#1f2937;
 }
 .topbar{background:var(--topbar);color:var(--topbar-text)}
 .topbarActions{display:flex;align-items:center;gap:.65rem}
@@ -416,4 +424,131 @@ html[data-theme="dark"] ::backdrop{background:rgba(2,6,23,.72)}
 @media print{
   html[data-theme="dark"]{--bg:#fff;--panel:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;color-scheme:light}
   .themePicker{display:none!important}
+}
+
+
+/* v5.32 Mixed Stacking */
+#stackAssistBtn:not(:disabled){border-color:#7c3aed;background:color-mix(in srgb,#7c3aed 12%,var(--panel,#fff));font-weight:800}
+#stackAssistBtn:disabled{opacity:.48;cursor:not-allowed}
+.stackingStatus{margin:.45rem 0 .65rem;padding:.55rem .7rem;border-radius:.7rem;background:var(--soft,#eef2ff);color:var(--muted,#475569);font-size:.82rem;line-height:1.35}
+.mixedStackBadge{display:inline-block;margin-left:.3rem;padding:.08rem .3rem;border-radius:999px;background:#7c3aed;color:#fff;font-size:.62rem;vertical-align:middle;white-space:nowrap}
+.stack:has(.mixedStackBadge){box-shadow:inset 0 0 0 2px rgba(124,58,237,.45)}
+
+
+/* v5.33 — corrección global de contraste claro/oscuro */
+.patternStats,
+.loadStatsGrid>div,
+.solutionCard,
+.moreTools,
+.advancedSettings,
+.historyItem,
+.historyEmpty,
+.referencePreview,
+.pendingList,
+.catalogManager,
+.comparisonPanel,
+.progressiveOffer,
+.progressiveStatus{
+  background:var(--soft-panel);
+  color:var(--text);
+  border-color:var(--line);
+}
+.moreTools>summary,
+.collapsibleCard>summary,
+.accordionPanel>summary{
+  color:var(--text);
+}
+.moreToolsBody h3,
+.visualLearningCard h2,
+.loadStatsCard h2,
+.efficiencyCard h2,
+.optimizerPanel strong,
+.optimizerPanel h3{
+  color:var(--text);
+}
+.patternStats,
+.statsGrade,
+.historyBadge,
+.confidenceBadge,
+.mixedStackBadge{
+  border:1px solid var(--badge-border);
+}
+html[data-theme="dark"] .patternStats,
+html[data-theme="dark"] .statsGrade,
+html[data-theme="dark"] .historyBadge,
+html[data-theme="dark"] .confidenceBadge{
+  background:var(--badge-bg);
+  color:var(--badge-text);
+  border-color:var(--badge-border);
+}
+html[data-theme="dark"] .statsGrade.warn,
+html[data-theme="dark"] .historyBadge.pending{
+  background:#4a3a18;
+  color:#fde68a;
+  border-color:#78612a;
+}
+html[data-theme="dark"] .statsGrade.bad{
+  background:#4a2025;
+  color:#fecaca;
+  border-color:#7f343d;
+}
+html[data-theme="dark"] .historyBadge.complete{
+  background:#183d2a;
+  color:#bbf7d0;
+  border-color:#286344;
+}
+html[data-theme="dark"] .solutionCard.best{
+  background:#172554;
+  color:var(--text);
+  border-color:#60a5fa;
+}
+html[data-theme="dark"] .solutionCard p,
+html[data-theme="dark"] .optimizerHeader p,
+html[data-theme="dark"] .efficiencyLayout p,
+html[data-theme="dark"] .historyMeta small,
+html[data-theme="dark"] .patternItem small{
+  color:var(--muted);
+}
+html[data-theme="dark"] .efficiencyRing:before{
+  background:var(--surface-muted);
+}
+html[data-theme="dark"] .efficiencyRing strong{
+  color:#f8fafc;
+}
+html[data-theme="dark"] .efficiencyRing{
+  background:conic-gradient(#ef4444 calc(var(--score)*1%),#374151 0);
+}
+html[data-theme="dark"] .efficiencyRing.warn{
+  background:conic-gradient(#f59e0b calc(var(--score)*1%),#374151 0);
+}
+html[data-theme="dark"] .efficiencyRing.good{
+  background:conic-gradient(#22c55e calc(var(--score)*1%),#374151 0);
+}
+html[data-theme="dark"] .efficiencyRing.excellent{
+  background:conic-gradient(#10b981 calc(var(--score)*1%),#374151 0);
+}
+html[data-theme="dark"] .visualLearningCard button:not(.primary),
+html[data-theme="dark"] .moreTools button:not(.primary),
+html[data-theme="dark"] .optimizerPanel button:not(.primary){
+  background:#374151;
+  color:#f8fafc;
+  border-color:#4b5563;
+}
+html[data-theme="dark"] .visualLearningCard button.primary,
+html[data-theme="dark"] .optimizerPanel button.primary{
+  background:var(--accent);
+  color:#fff;
+  border-color:var(--accent);
+}
+html[data-theme="dark"] .patternItem,
+html[data-theme="dark"] .historyItem,
+html[data-theme="dark"] .photoPreview,
+html[data-theme="dark"] .photoReviewTable th{
+  background:var(--soft-panel);
+  color:var(--text);
+  border-color:var(--line);
+}
+html[data-theme="dark"] .photoTableWrap,
+html[data-theme="dark"] .photoReviewTable td{
+  border-color:var(--line);
 }

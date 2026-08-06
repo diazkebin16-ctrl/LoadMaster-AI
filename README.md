@@ -1,5 +1,14 @@
-# LoadMaster AI v5.31 DARK MODE
+# LoadMaster AI v5.33 CONTRAST FIX
 
-Añade selector de tema Claro / Oscuro / Sistema. La preferencia se guarda localmente y no modifica medidas, posiciones, exportaciones ni el motor de optimización.
+Esta versión corrige el contraste visual del modo oscuro sin cambiar las medidas ni el motor de optimización.
 
-La exportación de imagen y PDF se mantiene con fondo claro para facilitar impresión y compartir.
+## Cambios
+
+- Fondo gris oscuro y texto legible en etiquetas y paneles.
+- Corrección de Aprendizaje visual, Guardar patrón y Detectar filas.
+- Corrección de Estadísticas de carga e Indicador de eficiencia.
+- Corrección de las insignias del historial y las últimas 10 optimizaciones.
+- Corrección de Resultados de optimización y Más herramientas.
+- Variables CSS reutilizables para futuras etiquetas.
+- El modo claro, los PDF y las imágenes conservan su apariencia clara.
+- Se mantienen el apilamiento mixto y todas las funciones de v5.32.

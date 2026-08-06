@@ -5,7 +5,7 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
 <meta content="#111827" name="theme-color"/>
-<title>LoadMaster AI 5.31 — DARK MODE</title>
+<title>LoadMaster AI 5.33 — CONTRAST FIX</title>
 <link href="manifest.webmanifest" rel="manifest"/>
 <link href="styles.css" rel="stylesheet"/>
 </head>
@@ -13,14 +13,14 @@
 <header class="topbar">
 <div>
 <h1>LoadMaster AI</h1>
-<p>Engine v13 · IA adaptativa · compactación automática · v5.31</p>
+<p>Engine v15 · contraste oscuro corregido · v5.33</p>
 </div>
 <div class="topbarActions">
 <label class="themePicker" for="themeSelect"><span>Tema</span><select id="themeSelect" aria-label="Tema de la aplicación"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label>
 <button class="primary" hidden="" id="installBtn">Instalar</button>
 </div>
 </header>
-<main class="app"><aside class="sidebar sidebarTop"><section class="card versionCard"><strong>v5.31 DARK MODE</strong> · Tema claro, oscuro o automático según el sistema, sin afectar las medidas ni el optimizador.</section><details class="card collapsibleCard accordionPanel" id="trailerSettings">
+<main class="app"><aside class="sidebar sidebarTop"><section class="card versionCard"><strong>v5.33 CONTRAST FIX</strong> · Contraste uniforme en modo oscuro para etiquetas, resultados, estadísticas, eficiencia y herramientas, sin perder el apilamiento mixto.</section><details class="card collapsibleCard accordionPanel" id="trailerSettings">
 <summary><span>Configuración del tráiler</span><small id="trailerSummary">96 × 628 pulg.</small></summary>
 <div class="detailsBody">
 <label>Modelo guardado
@@ -46,7 +46,7 @@
 </div>
 <button id="applyTrailer">Aplicar</button>
 </div>
-</details><section class="card quickToolsCard" id="quickToolsCard"><h2>Herramientas</h2><p class="cardHelp">Acciones principales para optimizar y revisar la carga.</p><div class="primaryToolGrid"><button class="primary" id="optimizeBtn">Optimización IA</button><button id="retryOptimizeBtn" type="button">Reintentar</button><button id="compactBtn">Compactar</button><button class="primary" id="manualModeBtn" type="button">Acomodar manualmente</button><button hidden="" id="finishManualBtn" type="button">Finalizar edición</button></div><details class="moreTools"><summary>Más herramientas</summary><div class="moreToolsBody"><div class="buttonGrid"><button id="undoBtn">Deshacer</button><button id="redoBtn">Rehacer</button><button id="clearBtn">Vaciar carga</button><button id="demoBtn">Cargar ejemplo</button></div><h3>Guardar / exportar</h3><input accept=".json" hidden="" id="fileInput" type="file"/><div class="buttonGrid"><button id="saveLoadBtn">Guardar archivo</button><button id="openLoadBtn">Abrir archivo</button><button id="saveImageBtn">Guardar imagen</button><button id="printBtn">Imprimir</button><button class="primary" id="saveReportBtn">Reporte profesional PDF</button><button id="shareReportBtn">Compartir / WhatsApp</button></div></div></details></section></aside><section class="workspace">
+</details><section class="card quickToolsCard" id="quickToolsCard"><h2>Herramientas</h2><p class="cardHelp">Acciones principales para optimizar y revisar la carga.</p><div class="primaryToolGrid"><button class="primary" id="optimizeBtn">Optimización IA</button><button id="retryOptimizeBtn" type="button">Reintentar</button><button id="compactBtn">Compactar</button><button id="stackAssistBtn" type="button" disabled>Buscar apilamiento</button><button class="primary" id="manualModeBtn" type="button">Acomodar manualmente</button><button hidden="" id="finishManualBtn" type="button">Finalizar edición</button></div><details class="moreTools"><summary>Más herramientas</summary><div class="moreToolsBody"><div class="buttonGrid"><button id="undoBtn">Deshacer</button><button id="redoBtn">Rehacer</button><button id="clearBtn">Vaciar carga</button><button id="demoBtn">Cargar ejemplo</button></div><h3>Entrada inteligente</h3><p class="cardHelp">Disponible únicamente con Internet. Sin conexión puedes continuar agregando pallets manualmente.</p><div class="buttonGrid"><button class="primary" id="scanCameraBtn" type="button">Tomar foto de la orden</button><button id="scanGalleryBtn" type="button">Elegir foto</button></div><input accept="image/jpeg,image/png,image/webp" capture="environment" hidden id="scanCameraInput" type="file"/><input accept="image/jpeg,image/png,image/webp" hidden id="scanGalleryInput" type="file"/><h3>Guardar / exportar</h3><input accept=".json" hidden="" id="fileInput" type="file"/><div class="buttonGrid"><button id="saveLoadBtn">Guardar archivo</button><button id="openLoadBtn">Abrir archivo</button><button id="saveImageBtn">Guardar imagen</button><button id="printBtn">Imprimir</button><button class="primary" id="saveReportBtn">Reporte profesional PDF</button><button id="shareReportBtn">Compartir / WhatsApp</button></div></div></details></section></aside><section class="workspace">
 <div class="workspaceTop">
 <div>
 <strong id="planModeTitle">Plano compacto</strong>
@@ -78,7 +78,7 @@
 </div>
 <div class="progressiveStatus active" id="progressiveStatus" hidden><span class="progressivePulse" aria-hidden="true"></span><span id="progressiveStatusText">Preparando optimización progresiva…</span><button id="stopProgressiveBtn" type="button">Detener búsqueda</button></div><div class="progressiveOffer" id="progressiveOffer" hidden><strong>La IA encontró una mejora</strong><p id="progressiveOfferText"></p><div class="progressiveOfferActions"><button class="primary" id="applyProgressiveBtn" type="button">Aplicar mejora</button><button id="compareProgressiveBtn" type="button">Ver comparación</button><button id="ignoreProgressiveBtn" type="button">Ignorar</button></div></div><div class="optimizerResults" id="optimizerResults"></div>
 <section class="pendingSection">
-<div class="pendingHeader"><strong>Carga pendiente (<span id="pendingCount">0</span>)</strong><span><button id="retryPendingBtn" type="button">Reintentar</button><button id="clearPendingBtn" type="button">Eliminar pendientes</button></span></div>
+<div class="pendingHeader"><strong>Carga pendiente (<span id="pendingCount">0</span>)</strong><span><button id="retryPendingBtn" type="button">Reintentar</button><button id="clearPendingBtn" type="button">Eliminar pendientes</button></span></div><div class="stackingStatus" id="stackingStatus">El apilamiento solo se ejecuta cuando tú pulsas “Buscar apilamiento”.</div>
 <div class="pendingList" id="pendingList"><div class="pendingEmpty">No hay pilas pendientes.</div></div>
 </section>
 </section>
@@ -264,6 +264,18 @@
 <button id="floatDeleteBtn" type="button">🗑 Eliminar</button>
 </div>
 </div>
+<dialog class="photoReaderDialog" id="photoReaderDialog">
+<form method="dialog" onsubmit="return false">
+<div class="catalogDialogHeader"><div><h2>Leer carga desde foto</h2><p class="cardHelp">La fotografía se analiza por Internet. Revisa todos los datos antes de agregarlos.</p></div><button id="closePhotoReader" type="button">×</button></div>
+<div class="photoReaderSetup">
+<label>Clave de API de OpenAI (solo esta sesión)<input autocomplete="off" id="visionApiKey" placeholder="sk-…" type="password"/></label>
+<label>Modelo<input id="visionModel" type="text" value="gpt-5.6"/></label>
+<p class="securityNote">La clave no se guarda en archivos ni en el catálogo. Permanece únicamente en la memoria de esta pestaña.</p>
+</div>
+<div class="photoPreviewGrid"><div class="photoPreview" id="photoPreview"><span>Selecciona o toma una fotografía.</span></div><div><strong id="photoReaderStatus">Esperando imagen.</strong><p class="cardHelp" id="photoReaderHelp">La IA buscará cantidad, largo, ancho, altura y tipo 2-way o 4-way.</p><button class="primary" disabled id="analyzePhotoBtn" type="button">Analizar foto</button></div></div>
+<div hidden id="photoReviewSection"><div class="photoReviewHeader"><div><h3>Revisar datos detectados</h3><p>Corrige cualquier dato dudoso antes de agregar la carga.</p></div><button id="addPhotoRowBtn" type="button">Agregar fila</button></div><div class="photoTableWrap"><table class="photoReviewTable"><thead><tr><th>Nombre</th><th>Cantidad</th><th>Largo</th><th>Ancho</th><th>Máx./pila</th><th>Tipo</th><th>Giro</th><th>Conf.</th><th></th></tr></thead><tbody id="photoReviewBody"></tbody></table></div><div class="photoReviewActions"><button id="cancelPhotoImportBtn" type="button">Cancelar</button><button class="primary" id="confirmPhotoImportBtn" type="button">Agregar a la carga</button></div></div>
+</form>
+</dialog>
 <dialog class="catalogDialog" id="catalogDialog">
 <form method="dialog" onsubmit="return false">
 <div class="catalogDialogHeader"><h2 id="catalogDialogTitle">Nuevo pallet</h2><button onclick="document.getElementById('catalogDialog').close()" type="button">×</button></div>
@@ -283,6 +295,6 @@
 </form>
 </dialog>
 <div aria-live="polite" class="toast" id="toast"></div>
-<script defer="" src="app.js?v=5.29-smart-ranking"></script>
+<script defer="" src="app.js?v=5.32-mixed-stacking"></script>
 </body>
 </html>

@@ -1,0 +1,21 @@
+const fs=require('fs'),vm=require('vm');
+const html=fs.readFileSync('index.html','utf8');let src=fs.readFileSync('app.js','utf8');
+function ok(v,m){if(!v)throw new Error(m)}
+ok(html.includes('v5.32 MIXED STACKING'),'Versión visual incorrecta');
+ok(html.includes('id="stackAssistBtn"'),'Falta el botón Buscar apilamiento');
+ok(src.includes('function mixedStackingPlan'),'Falta el planificador de apilamiento mixto');
+ok(src.includes('searchMixedStacking()'),'Falta la acción manual de apilamiento');
+src=src.replace('new App();','globalThis.__LM={mixedStackingPlan,validateLayout};');
+const sandbox={console,Date,Math,performance:{now:()=>0},setTimeout:()=>{},clearTimeout:()=>{},localStorage:{getItem:()=>null,setItem:()=>{}},document:{documentElement:{dataset:{}},readyState:'complete',getElementById:()=>null,querySelector:()=>null,createElement:()=>({})},window:{addEventListener:()=>{},matchMedia:()=>({matches:false,addEventListener:()=>{}})},navigator:{},crypto:{randomUUID:()=>String(Math.random())}};
+vm.createContext(sandbox);vm.runInContext(src,sandbox);const {mixedStackingPlan,validateLayout}=sandbox.__LM;
+const trailer={width:96,length:200};
+const library=[{id:'a',name:'30x30',w:30,l:30,maxHeight:20},{id:'b',name:'28x28',w:28,l:28,maxHeight:18}];
+const base=[{id:'base',name:'30x30',w:30,l:30,x:0,y:0,qty:10,maxHeight:20,type:'4-way',canRotate:true}];
+const pending=[{id:'up',name:'28x28',w:28,l:28,qty:8,maxHeight:18,type:'4-way',canRotate:true}];
+let plan=mixedStackingPlan(base,pending,library,trailer);
+ok(plan.ok,'El plan válido fue rechazado');ok(plan.pending.length===0,'No insertó la pendiente compatible');ok(plan.stacks[0].qty===18,'No respetó el total combinado');ok(plan.stacks[0].stackLimit===18,'No usó el límite más bajo');ok(plan.stacks[0].layers.length===2,'No guardó las dos capas');ok(validateLayout(plan.stacks,trailer).ok,'El resultado creó una distribución inválida');
+plan=mixedStackingPlan(base,[{...pending[0],qty:10}],library,trailer);
+ok(plan.pending.length===1&&plan.pending[0].qty===2,'No conservó el remanente cuando faltó capacidad');ok(plan.stacks[0].qty===18,'Excedió o no llenó correctamente el límite mínimo');
+plan=mixedStackingPlan(base,[{id:'large',name:'42x42',w:42,l:42,qty:1,maxHeight:18,type:'4-way',canRotate:true}],library,trailer);
+ok(plan.actions.length===0&&plan.pending.length===1,'Permitió una pieza superior más grande que la base');
+console.log('PASS v5.32: apilamiento mixto manual, soporte total y límite mínimo de altura.');

@@ -1354,7 +1354,7 @@ function normalizeLibraryItem(raw={}){
         ctx.save();ctx.beginPath();ctx.rect(x+2,y+2,Math.max(0,w-4),Math.max(0,h-4));ctx.clip();
         ctx.fillStyle='#111827';ctx.font=`700 ${Math.max(10,Math.min(16,w/6,h/3))}px system-ui, sans-serif`;
         ctx.fillText(String(stack.name||`${stack.l}×${stack.w}`),x+5,y+18);
-        ctx.font='11px system-ui, sans-serif';ctx.fillText(`${Number(stack.qty)||0} alto · ${stack.type||''}`,x+5,y+33);ctx.restore();
+        ctx.font='11px system-ui, sans-serif';const layerText=Array.isArray(stack.layers)&&stack.layers.length>1?` · ${stack.layers.length} niveles`:'';ctx.fillText(`${Number(stack.qty)||0} alto · ${stack.type||''}${layerText}`,x+5,y+33);ctx.restore();
       }
     }
     if(!thumbnail){
@@ -1461,7 +1461,7 @@ function normalizeLibraryItem(raw={}){
 
   function createPattern(name,stacks,trailer,source={}){
     const rows=detectRows(stacks);
-    return {id:uid(),version:2,name:name||`Patrón ${new Date().toLocaleDateString()}`,createdAt:new Date().toISOString(),trailer:{width:trailer.width,length:trailer.length},source:{fileName:source.fileName||'',fileSize:source.fileSize||0,fileType:source.fileType||''},thumbnail:makePatternThumbnail(stacks,trailer),rows:rows.map(r=>({y:r.y,length:r.length,signature:r.signature})),pieces:stacks.map(s=>({name:s.name,w:s.w,l:s.l,x:s.x,y:s.y,qty:s.qty,type:s.type,category:s.category,canRotate:s.canRotate!==false,rotated:!!s.rotated}))};
+    return {id:uid(),version:2,name:name||`Patrón ${new Date().toLocaleDateString()}`,createdAt:new Date().toISOString(),trailer:{width:trailer.width,length:trailer.length},source:{fileName:source.fileName||'',fileSize:source.fileSize||0,fileType:source.fileType||''},thumbnail:makePatternThumbnail(stacks,trailer),rows:rows.map(r=>({y:r.y,length:r.length,signature:r.signature})),pieces:stacks.map(s=>({name:s.name,w:s.w,l:s.l,x:s.x,y:s.y,qty:s.qty,maxHeight:s.maxHeight,type:s.type,category:s.category,canRotate:s.canRotate!==false,rotated:!!s.rotated,stackMode:s.stackMode||"",stackLimit:s.stackLimit||null,layers:Array.isArray(s.layers)?Geometry.clone(s.layers):undefined}))};
   }
 
   const VISUAL_HISTORY_STORAGE_KEY = "loadmaster-visual-history-v1";
@@ -1623,9 +1623,100 @@ function normalizeLibraryItem(raw={}){
     const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed.items)?parsed.items:[];
     return rows.map((raw,i)=>{const length=Number(raw.length??raw.largo??raw.l??0),width=Number(raw.width??raw.ancho??raw.w??0),quantity=Math.max(1,Math.round(Number(raw.quantity??raw.cantidad??raw.qty??1)||1)),maxHeight=Math.max(1,Math.round(Number(raw.maxHeight??raw.max_por_pila??raw.altura??raw.stackMax??quantity)||quantity));let type=String(raw.type??raw.tipo??"4-way").toLowerCase();type=type.includes("2")?"2-way":"4-way";return {id:uid(),name:String(raw.name??raw.nombre??`${length||"?"}×${width||"?"}`).trim()||`Fila ${i+1}`,quantity,length,width,maxHeight,type,canRotate:raw.canRotate!==false&&raw.giro!==false&&type==="4-way",category:String(raw.category??raw.categoria??"Otra"),notes:String(raw.notes??raw.notas??""),confidence:Math.max(0,Math.min(1,Number(raw.confidence??raw.confianza??.5)||.5))};}).filter(x=>x.length>0&&x.width>0&&x.quantity>0);
   }
+
+  function libraryMaxHeightFor(stack,library=[]){
+    const explicit=Number(stack?.maxHeight||stack?.stackMax||stack?.alturaMaxima||0);
+    if(explicit>0)return Math.max(explicit,Number(stack?.qty)||1);
+    const sw=Number(stack?.w)||0,sl=Number(stack?.l)||0,name=String(stack?.name||'').trim().toLowerCase();
+    const match=(library||[]).find(item=>{
+      const direct=Math.abs((Number(item.w)||0)-sw)<EPS&&Math.abs((Number(item.l)||0)-sl)<EPS;
+      const rotated=Math.abs((Number(item.w)||0)-sl)<EPS&&Math.abs((Number(item.l)||0)-sw)<EPS;
+      return (direct||rotated)&&(name?String(item.name||'').trim().toLowerCase()===name:true);
+    })||(library||[]).find(item=>{
+      const direct=Math.abs((Number(item.w)||0)-sw)<EPS&&Math.abs((Number(item.l)||0)-sl)<EPS;
+      const rotated=Math.abs((Number(item.w)||0)-sl)<EPS&&Math.abs((Number(item.l)||0)-sw)<EPS;
+      return direct||rotated;
+    });
+    return Math.max(Number(match?.maxHeight)||0,Number(stack?.qty)||1);
+  }
+  function stackLayersFor(stack,library=[]){
+    if(Array.isArray(stack?.layers)&&stack.layers.length)return stack.layers.map(layer=>({...Geometry.clone(layer),qty:Math.max(1,Number(layer.qty)||1),maxHeight:Math.max(1,Number(layer.maxHeight)||libraryMaxHeightFor(layer,library))}));
+    return [{id:stack.id,name:stack.name,w:Number(stack.w),l:Number(stack.l),qty:Math.max(1,Number(stack.qty)||1),maxHeight:libraryMaxHeightFor(stack,library),type:stack.type||'4-way',canRotate:stack.canRotate!==false,category:stack.category||'Otra'}];
+  }
+  function topSupportFor(stack,library=[]){const layers=stackLayersFor(stack,library),top=layers[layers.length-1];return {w:Number(top.w),l:Number(top.l),layers};}
+  function fitUpperOrientation(upper,support){
+    const options=[{w:Number(upper.w),l:Number(upper.l),rotated:false}];
+    if(upper.canRotate!==false&&upper.type==='4-way'&&Math.abs(Number(upper.w)-Number(upper.l))>EPS)options.push({w:Number(upper.l),l:Number(upper.w),rotated:true});
+    return options.filter(o=>o.w<=support.w+EPS&&o.l<=support.l+EPS).sort((a,b)=>(support.w*support.l-o.w*o.l)-(support.w*support.l-b.w*b.l))[0]||null;
+  }
+  function mixedStackingPlan(placedInput,pendingInput,library=[],trailer={width:96,length:628}){
+    const placed=Geometry.clone(placedInput||[]),pending=Geometry.clone(pendingInput||[]);
+    const actions=[];
+    const applyLayer=(base,source,take,orientation)=>{
+      const layers=stackLayersFor(base,library),sourceMax=libraryMaxHeightFor(source,library);
+      const limit=Math.min(...layers.map(x=>Math.max(1,Number(x.maxHeight)||1)),sourceMax);
+      const current=layers.reduce((n,x)=>n+(Number(x.qty)||1),0);
+      if(take<=0||current+take>limit)return false;
+      layers.push({id:`${source.id||uid()}-layer-${layers.length+1}`,sourceId:source.id,name:source.name,w:orientation.w,l:orientation.l,qty:take,maxHeight:sourceMax,type:source.type||'4-way',canRotate:source.canRotate!==false,category:source.category||'Otra',rotated:orientation.rotated});
+      base.layers=layers;base.qty=current+take;base.maxHeight=limit;base.stackMode='mixed';base.stackLimit=limit;base.mixedStacking=true;
+      actions.push({type:'stack',baseId:base.id,upperId:source.id,upperName:source.name,baseName:base.name,qty:take,total:base.qty,limit});
+      return true;
+    };
+    // Primero coloca directamente las pendientes sobre bases existentes. Las piezas pequeñas se intentan primero.
+    const order=[...pending].sort((a,b)=>a.w*a.l-b.w*b.l||a.qty-b.qty);
+    const residual=[];
+    for(const source of order){
+      let remaining=Math.max(1,Number(source.qty)||1);
+      while(remaining>0){
+        const options=[];
+        for(const base of placed){
+          if(base.locked)continue;
+          const support=topSupportFor(base,library),orientation=fitUpperOrientation(source,support);
+          if(!orientation)continue;
+          const limit=Math.min(...support.layers.map(x=>Math.max(1,Number(x.maxHeight)||1)),libraryMaxHeightFor(source,library));
+          const current=support.layers.reduce((n,x)=>n+(Number(x.qty)||1),0),capacity=Math.max(0,limit-current);
+          if(capacity<=0)continue;
+          options.push({base,orientation,capacity,waste:support.w*support.l-orientation.w*orientation.l});
+        }
+        options.sort((a,b)=>a.waste-b.waste||b.capacity-a.capacity||a.base.y-b.base.y);
+        const best=options[0];if(!best)break;
+        const take=Math.min(remaining,best.capacity);if(!applyLayer(best.base,source,take,best.orientation))break;remaining-=take;
+      }
+      if(remaining>0)residual.push({...source,qty:remaining});
+    }
+    // Segundo intento: mover una pila pequeña del piso sobre otra para liberar su lugar a una pendiente.
+    let changed=true,guard=0;
+    while(changed&&residual.length&&guard++<12){
+      changed=false;
+      outer:for(let pi=0;pi<residual.length;pi++){
+        const source=residual[pi];
+        for(let ui=0;ui<placed.length;ui++){
+          const upper=placed[ui];if(upper.locked||upper.stackMode==='mixed')continue;
+          for(let bi=0;bi<placed.length;bi++){
+            const base=placed[bi];if(base.id===upper.id||base.locked)continue;
+            const support=topSupportFor(base,library),upperOrientation=fitUpperOrientation(upper,support);if(!upperOrientation)continue;
+            const layers=stackLayersFor(base,library),limit=Math.min(...layers.map(x=>x.maxHeight),libraryMaxHeightFor(upper,library));
+            const current=layers.reduce((n,x)=>n+x.qty,0),upperQty=Math.max(1,Number(upper.qty)||1);if(current+upperQty>limit)continue;
+            const floorOptions=[{w:source.w,l:source.l,rotated:false},...(source.canRotate!==false&&source.type==='4-way'&&source.w!==source.l?[{w:source.l,l:source.w,rotated:true}]:[])];
+            for(const floorOrientation of floorOptions){
+              const replacement={...source,w:floorOrientation.w,l:floorOrientation.l,x:upper.x,y:upper.y,rotated:floorOrientation.rotated,qty:Math.max(1,Number(source.qty)||1),maxHeight:libraryMaxHeightFor(source,library)};
+              const withoutUpper=placed.filter(x=>x.id!==upper.id);
+              if(!Geometry.valid(replacement,withoutUpper,trailer))continue;
+              if(!applyLayer(base,upper,upperQty,upperOrientation))continue;
+              placed.splice(ui,1);placed.push(replacement);residual.splice(pi,1);
+              actions.push({type:'relocate',movedName:upper.name,newFloorName:source.name});changed=true;break outer;
+            }
+          }
+        }
+      }
+    }
+    const check=validateLayout(placed,trailer);
+    return {ok:check.ok,stacks:check.ok?placed:Geometry.clone(placedInput||[]),pending:check.ok?residual:Geometry.clone(pendingInput||[]),actions,stackedPallets:actions.filter(a=>a.type==='stack').reduce((n,a)=>n+a.qty,0),freedPositions:actions.filter(a=>a.type==='relocate').length,validation:check};
+  }
+
   class App {
     constructor(){
-      this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[];
+      this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[]; this.lastStackingResult=null;
       this.bind(); this.syncTrailerInputs(); this.restoreAccordionState(); this.render();
       if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
     }
@@ -1657,7 +1748,7 @@ function normalizeLibraryItem(raw={}){
       $("duplicateBtn").onclick=()=>this.duplicateSelected();
       $("deleteBtn").onclick=()=>this.deleteSelected(); $("floatDeleteBtn").onclick=()=>this.deleteSelected();
       $("undoBtn").onclick=()=>this.undo(); $("redoBtn").onclick=()=>this.redo();
-      $("compactBtn").onclick=()=>this.compact(); $("optimizeBtn").onclick=()=>this.optimize(); $("retryOptimizeBtn").onclick=()=>this.optimize();
+      $("compactBtn").onclick=()=>this.compact(); $("stackAssistBtn").onclick=()=>this.searchMixedStacking(); $("optimizeBtn").onclick=()=>this.optimize(); $("retryOptimizeBtn").onclick=()=>this.optimize();
       $("clearBtn").onclick=()=>{if(!this.state.stacks.length)return;this.store.remember();this.state.stacks=[];this.state.selectedId=null;this.render();};
       $("demoBtn").onclick=()=>this.demo();
       $("saveLoadBtn").onclick=()=>this.saveFile(); $("openLoadBtn").onclick=()=>$("fileInput").click();
@@ -1714,7 +1805,7 @@ function normalizeLibraryItem(raw={}){
       const file=e.target.files?.[0];if(!file)return;
       if(!navigator.onLine){e.target.value="";return this.toast("Sin Internet: agrega la carga manualmente");}
       if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>15*1024*1024){e.target.value="";return this.toast("Usa JPG, PNG o WebP de hasta 15 MB");}
-      try{this.photoReaderFile=file;this.photoReaderDataUrl=await resizeImageDataUrl(file);this.photoReaderItems=[];const preview=$("photoPreview");preview.innerHTML="";const img=document.createElement("img");img.src=this.photoReaderDataUrl;img.alt="Orden seleccionada";preview.appendChild(img);$("photoReaderStatus").textContent=`Imagen lista: ${file.name}`;$("photoReaderHelp").textContent="Configura la clave de API para analizarla. Los datos no se agregan hasta que los confirmes.";$("photoReviewSection").hidden=true;$("analyzePhotoBtn").disabled=false;$("visionApiKey").value=sessionStorage.getItem("lm_vision_api_key")||"";$("visionModel").value=sessionStorage.getItem("lm_vision_model")||"gpt-5.6";$("photoReaderDialog").showModal();}catch(err){this.toast(err.message||"No se pudo abrir la imagen");}
+      try{this.photoReaderFile=file;this.photoReaderDataUrl=await resizeImageDataUrl(file);this.photoReaderItems=[]; this.lastStackingResult=null;const preview=$("photoPreview");preview.innerHTML="";const img=document.createElement("img");img.src=this.photoReaderDataUrl;img.alt="Orden seleccionada";preview.appendChild(img);$("photoReaderStatus").textContent=`Imagen lista: ${file.name}`;$("photoReaderHelp").textContent="Configura la clave de API para analizarla. Los datos no se agregan hasta que los confirmes.";$("photoReviewSection").hidden=true;$("analyzePhotoBtn").disabled=false;$("visionApiKey").value=sessionStorage.getItem("lm_vision_api_key")||"";$("visionModel").value=sessionStorage.getItem("lm_vision_model")||"gpt-5.6";$("photoReaderDialog").showModal();}catch(err){this.toast(err.message||"No se pudo abrir la imagen");}
     }
     async analyzeLoadPhoto(){
       if(!navigator.onLine)return this.toast("La lectura desde foto requiere Internet");
@@ -1732,7 +1823,7 @@ function normalizeLibraryItem(raw={}){
     }
     confirmPhotoImport(){
       const items=this.photoReaderItems.map(x=>({...x,quantity:Math.max(1,Math.round(Number(x.quantity)||0)),length:Number(x.length)||0,width:Number(x.width)||0,maxHeight:Math.max(1,Math.round(Number(x.maxHeight)||0))})).filter(x=>x.length>0&&x.width>0&&x.quantity>0&&x.maxHeight>0);if(!items.length)return this.toast("No hay filas válidas para agregar");
-      this.store.remember();let stacksAdded=0,palletsAdded=0;for(const item of items){const base={name:item.name||`${item.length}×${item.width}`,w:item.width,l:item.length,type:item.type==="2-way"?"2-way":"4-way",category:item.category||"Otra",canRotate:item.type!=="2-way"&&item.canRotate!==false,locked:false,rotated:false};this.splitQty(item.quantity,item.maxHeight).forEach((n,i)=>{this.state.stacks.push({...base,id:uid(),qty:n,x:Math.max(0,Math.min(this.state.trailer.width-item.width,4+(i%2)*(item.width+2))),y:Math.max(0,Geometry.usedLength(this.state.stacks)+2)});stacksAdded++;palletsAdded+=n;});}
+      this.store.remember();let stacksAdded=0,palletsAdded=0;for(const item of items){const base={name:item.name||`${item.length}×${item.width}`,w:item.width,l:item.length,type:item.type==="2-way"?"2-way":"4-way",category:item.category||"Otra",canRotate:item.type!=="2-way"&&item.canRotate!==false,locked:false,rotated:false,maxHeight:item.maxHeight};this.splitQty(item.quantity,item.maxHeight).forEach((n,i)=>{this.state.stacks.push({...base,id:uid(),qty:n,x:Math.max(0,Math.min(this.state.trailer.width-item.width,4+(i%2)*(item.width+2))),y:Math.max(0,Geometry.usedLength(this.state.stacks)+2)});stacksAdded++;palletsAdded+=n;});}
       this.state.selectedId=null;this.render();$("photoReaderDialog").close();this.toast(`${palletsAdded} pallets agregados en ${stacksAdded} pilas. Revisa y optimiza.`);
     }
     loadReferenceImage(e){
@@ -1842,7 +1933,7 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.30",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.33",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
@@ -1852,25 +1943,40 @@ function normalizeLibraryItem(raw={}){
       const w=+$("palletWidth").value,l=+$("palletLength").value,qty=+$("palletQty").value,max=+$("maxHeight").value;
       if(!(w>0&&l>0&&qty>0&&max>0)){this.toast("Revisa las medidas y cantidades");return;}
       this.store.remember();
-      const base={name:$("palletName").value.trim()||`${w}×${l}`,w,l,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked,locked:false,rotated:false};
+      const base={name:$("palletName").value.trim()||`${w}×${l}`,w,l,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked,locked:false,rotated:false,maxHeight:max};
       this.splitQty(qty,max).forEach((n,i)=>this.state.stacks.push({...base,id:uid(),qty:n,x:Math.min(this.state.trailer.width-w,4+(i%2)*(w+2)),y:Math.max(0,Geometry.usedLength(this.state.stacks)+2)}));
       this.render();
     }
-    rotateSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");if(s.locked)return this.toast("La pila está bloqueada");if(s.type!=="4-way"||!s.canRotate)return this.toast("Esta pila no puede girarse");this.store.remember();[s.w,s.l]=[s.l,s.w];s.rotated=!s.rotated;this.render();}
+    rotateSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");if(s.locked)return this.toast("La pila está bloqueada");if(Array.isArray(s.layers)&&s.layers.length>1)return this.toast("Una pila mixta no se gira como bloque; sepárala antes de cambiar su orientación");if(s.type!=="4-way"||!s.canRotate)return this.toast("Esta pila no puede girarse");this.store.remember();[s.w,s.l]=[s.l,s.w];s.rotated=!s.rotated;this.render();}
     toggleLock(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();s.locked=!s.locked;this.render();}
     duplicateSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();const c={...clone(s),id:uid(),x:s.x+2,y:s.y+s.l+2,locked:false};this.state.stacks.push(c);this.state.selectedId=c.id;this.render();}
     deleteSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();this.state.stacks=this.state.stacks.filter(x=>x.id!==s.id);this.state.selectedId=null;this.render();}
     undo(){if(!this.store.history.length)return;this.store.future.push(this.store.snapshot());this.store.restore(this.store.history.pop());this.syncTrailerInputs();this.render();}
     redo(){if(!this.store.future.length)return;this.store.history.push(this.store.snapshot());this.store.restore(this.store.future.pop());this.syncTrailerInputs();this.render();}
+    searchMixedStacking(){
+      if(!(this.state.pending||[]).length)return this.toast("No hay carga pendiente para apilar");
+      if(!this.state.stacks.length)return this.toast("Primero debe existir al menos una pila base dentro del tráiler");
+      const before=clone({stacks:this.state.stacks,pending:this.state.pending});
+      const plan=mixedStackingPlan(this.state.stacks,this.state.pending,this.state.library,this.state.trailer);
+      if(!plan.ok)return this.toast(`El apilamiento fue rechazado: ${explainValidation(plan.validation)}`);
+      if(!plan.actions.length)return this.toast("No encontré una combinación segura: la pieza superior debe caber completamente y la altura total debe respetar el límite más bajo");
+      const previousPending=(this.state.pending||[]).reduce((n,s)=>n+(Number(s.qty)||1),0),nextPending=plan.pending.reduce((n,s)=>n+(Number(s.qty)||1),0);
+      if(nextPending>=previousPending)return this.toast("No se encontró un apilamiento que reduzca la carga pendiente");
+      this.store.remember();this.state.stacks=plan.stacks;this.state.pending=plan.pending;this.state.selectedId=null;this.lastStackingResult=plan;this.lastWinningStrategy="Apilamiento mixto asistido";this.lastOptimizationMs=0;this.render();
+      const placed=previousPending-nextPending,composites=plan.stacks.filter(s=>Array.isArray(s.layers)&&s.layers.length>1).length;
+      this.toast(`Apilamiento aplicado: ${placed} pallet${placed===1?'':'s'} rescatado${placed===1?'':'s'} en ${composites} pila${composites===1?'':'s'} mixta${composites===1?'':'s'}`);
+      const status=$("stackingStatus");if(status)status.textContent=nextPending?`Se apilaron ${placed} pallets. Aún quedan ${nextPending} pendientes.`:`Carga pendiente resuelta mediante apilamiento seguro.`;
+    }
+
     renderPending(){
       const root=$("pendingList"),count=$("pendingCount");if(!root||!count)return;
-      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";
-      if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';return;}
-      pending.forEach(s=>{const row=document.createElement("div");row.className="pendingItem";row.innerHTML=`<div><strong>${s.name}</strong><small>${s.w}×${s.l} · ${s.qty||1} pallets · ${s.type}</small></div><button type="button" data-edit>Editar</button>`;row.querySelector("[data-edit]").onclick=()=>this.editPending(s.id);root.appendChild(row);});
+      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";const stackBtn=$("stackAssistBtn");if(stackBtn)stackBtn.disabled=!pending.length||!this.state.stacks.length;
+      if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';const status=$("stackingStatus");if(status)status.textContent="El apilamiento solo se ejecuta cuando tú pulsas “Buscar apilamiento”.";return;}
+      pending.forEach(s=>{const row=document.createElement("div");row.className="pendingItem";row.innerHTML=`<div><strong>${s.name}</strong><small>${s.w}×${s.l} · ${s.qty||1} pallets · máx ${libraryMaxHeightFor(s,this.state.library)} · ${s.type}</small></div><button type="button" data-edit>Editar</button>`;row.querySelector("[data-edit]").onclick=()=>this.editPending(s.id);root.appendChild(row);});
     }
     editPending(id){
       const s=(this.state.pending||[]).find(x=>x.id===id);if(!s)return;
-      $("palletWidth").value=s.w;$("palletLength").value=s.l;$("palletQty").value=s.qty||1;$("maxHeight").value=s.qty||1;$("palletType").value=s.type||"4-way";$("category").value=s.category||"New";$("canRotate").checked=s.canRotate!==false;$("palletName").value=s.name||`${s.w}×${s.l}`;
+      $("palletWidth").value=s.w;$("palletLength").value=s.l;$("palletQty").value=s.qty||1;$("maxHeight").value=s.maxHeight||s.qty||1;$("palletType").value=s.type||"4-way";$("category").value=s.category||"New";$("canRotate").checked=s.canRotate!==false;$("palletName").value=s.name||`${s.w}×${s.l}`;
       this.store.remember();this.state.pending=this.state.pending.filter(x=>x.id!==id);this.renderPending();this.toast("Pila pendiente cargada en el formulario; edítala y pulsa Crear pilas");
     }
     retryPending(){
@@ -1908,7 +2014,7 @@ function normalizeLibraryItem(raw={}){
       const saved=this.filterAndSortHistory(this.visualHistory.saved,false),recent=this.filterAndSortHistory(this.visualHistory.recent,true);$('savedHistoryCount').textContent=`(${saved.length})`;$('recentHistoryCount').textContent=`(${recent.length})`;renderList($('savedHistoryList'),this.visualHistory.saved,false);renderList($('recentHistoryList'),this.visualHistory.recent,true);this.updateHistorySelectionToolbar();this.updateHistorySummary();
     }
     createHistoryReportCanvas(entry){
-      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.29',620,1730);return canvas;
+      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.33',620,1730);return canvas;
     }
     exportHistoryEntriesPdf(entries){try{const valid=(entries||[]).slice(0,10);if(!valid.length)return this.toast('Selecciona al menos una carga');const blob=canvasesToPdfBlob(valid.map(e=>this.createHistoryReportCanvas(e))),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-reportes-${new Date().toISOString().slice(0,10)}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);this.toast(`${valid.length} reporte${valid.length===1?'':'s'} exportado${valid.length===1?'':'s'} en PDF`);}catch(error){this.toast(error.message||'No se pudieron crear los reportes');}}
     exportSelectedHistoryPdf(){this.exportHistoryEntriesPdf(this.getSelectedHistoryEntries());}
@@ -2023,11 +2129,11 @@ function normalizeLibraryItem(raw={}){
     }
     demo(){
       this.store.remember();this.state.trailer={width:96,length:628};this.state.stacks=[];
-      const add=(name,w,l,x,y,qty=20,type="4-way")=>this.state.stacks.push({id:uid(),name,w,l,x,y,qty,type,category:"New",canRotate:type==="4-way",locked:false,rotated:false});
+      const add=(name,w,l,x,y,qty=20,type="4-way")=>this.state.stacks.push({id:uid(),name,w,l,x,y,qty,maxHeight:Math.max(qty,20),type,category:"New",canRotate:type==="4-way",locked:false,rotated:false});
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.30",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.29.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.33",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.33.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
@@ -2099,7 +2205,7 @@ function normalizeLibraryItem(raw={}){
       const ox=padding,oy=padding+labelBand;ctx.fillStyle="#fff";ctx.strokeStyle="#111827";ctx.lineWidth=3;ctx.fillRect(ox,oy,trailer.length*scale,trailer.width*scale);ctx.strokeRect(ox,oy,trailer.length*scale,trailer.width*scale);
       ctx.strokeStyle="rgba(15,23,42,.08)";ctx.lineWidth=1;for(let x=0;x<trailer.length;x+=24){ctx.beginPath();ctx.moveTo(ox+x*scale,oy);ctx.lineTo(ox+x*scale,oy+trailer.width*scale);ctx.stroke();}
       for(let y=0;y<trailer.width;y+=24){ctx.beginPath();ctx.moveTo(ox,oy+y*scale);ctx.lineTo(ox+trailer.length*scale,oy+y*scale);ctx.stroke();}
-      for(const s of stacks){const valid=this.valid(s);ctx.fillStyle=s.locked?"rgba(124,58,237,.24)":valid?"rgba(37,99,235,.22)":"rgba(220,38,38,.25)";ctx.strokeStyle=s.locked?"#7c3aed":valid?"#16a34a":"#dc2626";ctx.lineWidth=Math.max(1,Math.min(2,scale*1.5));const x=ox+s.y*scale,y=oy+s.x*scale,w=s.l*scale,h=s.w*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);if(w>24&&h>15){ctx.fillStyle="#111827";ctx.font=`700 ${Math.max(7,Math.min(11,h*.32))}px system-ui`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(String(s.name||"Pila").slice(0,12),x+w/2,y+h/2);}}
+      for(const s of stacks){const valid=this.valid(s);ctx.fillStyle=s.locked?"rgba(124,58,237,.24)":valid?"rgba(37,99,235,.22)":"rgba(220,38,38,.25)";ctx.strokeStyle=s.locked?"#7c3aed":valid?"#16a34a":"#dc2626";ctx.lineWidth=Math.max(1,Math.min(2,scale*1.5));const x=ox+s.y*scale,y=oy+s.x*scale,w=s.l*scale,h=s.w*scale;ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);if(w>24&&h>15){ctx.fillStyle="#111827";ctx.font=`700 ${Math.max(7,Math.min(11,h*.32))}px system-ui`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(`${String(s.name||"Pila").slice(0,10)}${Array.isArray(s.layers)&&s.layers.length>1?` ↥${s.layers.length}`:""}`,x+w/2,y+h/2);}}
       ctx.fillStyle="#111827";ctx.font="700 11px system-ui";ctx.textAlign="left";ctx.textBaseline="alphabetic";ctx.fillText("NARIZ",ox,18);ctx.textAlign="right";ctx.fillText("PUERTAS",ox+trailer.length*scale,18);ctx.textAlign="center";ctx.fillStyle="#475569";ctx.font="600 10px system-ui";ctx.fillText(`${trailer.length}" largo × ${trailer.width}" ancho · ${stacks.length} pilas`,cssW/2,cssH-5);
     }
     renderLibrary(){
@@ -2120,11 +2226,11 @@ function normalizeLibraryItem(raw={}){
 
     render(){
       const trailer=$("trailer");trailer.style.width=`${this.state.trailer.width*SCALE}px`;trailer.style.height=`${this.state.trailer.length*SCALE}px`;trailer.querySelectorAll(".stack").forEach(n=>n.remove());
-      this.state.stacks.forEach(s=>{const el=document.createElement("div");el.className="stack"+(s.id===this.state.selectedId?" selected":"")+(s.locked?" locked":"")+(this.valid(s)?"":" invalid");el.dataset.id=s.id;el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.style.width=`${s.w*SCALE}px`;el.style.height=`${s.l*SCALE}px`;el.innerHTML=`${s.name}<small>${s.qty} alto · ${s.type}</small>`;trailer.appendChild(el);if(this.manualEditMode)this.wireDrag(el,s);});
+      this.state.stacks.forEach(s=>{const el=document.createElement("div");el.className="stack"+(s.id===this.state.selectedId?" selected":"")+(s.locked?" locked":"")+(this.valid(s)?"":" invalid");el.dataset.id=s.id;el.style.left=`${s.x*SCALE}px`;el.style.top=`${s.y*SCALE}px`;el.style.width=`${s.w*SCALE}px`;el.style.height=`${s.l*SCALE}px`;el.innerHTML=`${s.name}${Array.isArray(s.layers)&&s.layers.length>1?` <span class="mixedStackBadge">${s.layers.length} niveles</span>`:""}<small>${s.qty} alto · ${s.type}${s.stackLimit?` · límite ${s.stackLimit}`:""}</small>`;trailer.appendChild(el);if(this.manualEditMode)this.wireDrag(el,s);});
       $("compactPlanWrap").hidden=this.manualEditMode;$("manualCanvasWrap").hidden=!this.manualEditMode;$("manualModeBtn").hidden=this.manualEditMode;$("finishManualBtn").hidden=!this.manualEditMode;this.renderCompactPlan();
       this.renderLibrary();this.renderCatalog();this.renderSelection();this.renderMetrics();this.renderLoadStatistics();this.renderPatterns();this.renderPending();this.renderVisualHistory();
     }
-    renderSelection(){const s=this.selected();$("selectedInfo").textContent=s?`${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${s.locked?" · bloqueada":""}`:"Ninguna seleccionada";$("floatingTools").hidden=!s||!this.manualEditMode;if(s){$("bottomSelectedName").textContent=`${s.name} · ${s.qty} alto · ${s.type}`;$("floatLockBtn").textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";const can=s.type==="4-way"&&s.canRotate&&s.w!==s.l;$("floatRotateBtn").disabled=!can;}}
+    renderSelection(){const s=this.selected(),mixed=s&&Array.isArray(s.layers)&&s.layers.length>1;$("selectedInfo").textContent=s?`${s.name} · ${s.qty} alto · ${s.type} · ${s.category}${mixed?` · ${s.layers.length} niveles · límite ${s.stackLimit||s.maxHeight}`:""}${s.locked?" · bloqueada":""}`:"Ninguna seleccionada";$("floatingTools").hidden=!s||!this.manualEditMode;if(s){$("bottomSelectedName").textContent=`${s.name} · ${s.qty} alto · ${s.type}${mixed?` · ${s.layers.length} niveles`:""}`;$("floatLockBtn").textContent=s.locked?"🔓 Desbloq.":"🔒 Bloq.";const can=!mixed&&s.type==="4-way"&&s.canRotate&&s.w!==s.l;$("floatRotateBtn").disabled=!can;}}
     renderMetrics(){const used=Geometry.usedLength(this.state.stacks),free=Math.max(0,this.state.trailer.length-used),area=Geometry.floorArea(this.state.stacks),total=this.state.trailer.width*this.state.trailer.length,env=Math.max(1,this.state.trailer.width*used);$("metricStacks").textContent=this.state.stacks.length;$("metricPallets").textContent=this.state.stacks.reduce((a,s)=>a+s.qty,0);$("metricUsed").textContent=`${used.toFixed(1)}\"`;$("metricFree").textContent=`${free.toFixed(1)}\"`;$("metricUtilization").textContent=`${Math.min(100,area/Math.max(1,total)*100).toFixed(1)}%`;$("metricEfficiency").textContent=`${Math.min(100,area/env*100).toFixed(1)}%`;const bad=this.state.stacks.some(s=>!this.valid(s));$("metricStatus").textContent=bad?"Hay conflicto":"Carga válida";$("metricStatus").style.color=bad?"#dc2626":"#16a34a";$("freeZone").style.top=`${used*SCALE}px`;$("freeZone").style.height=`${free*SCALE}px`;}
     renderLoadStatistics(){
       const stats=calculateLoadStatistics(this.state.stacks,this.state.trailer);
@@ -2149,7 +2255,7 @@ function normalizeLibraryItem(raw={}){
 
 
 
-// v5.31: tema claro / oscuro / sistema
+// v5.33: corrección global de contraste en temas + apilamiento mixto asistido
 (function initThemeController(){
   const STORAGE_KEY="loadmaster-theme";
   const root=document.documentElement;

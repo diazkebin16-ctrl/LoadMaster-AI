@@ -1,11 +1,15 @@
-# TEST REPORT — v5.31 DARK MODE
+# TEST REPORT — v5.33 CONTRAST FIX
 
-- Selector Claro / Oscuro / Sistema conectado.
-- Preferencia persistente mediante localStorage.
-- Cambio automático al seguir el tema del sistema.
-- Meta theme-color actualizado según el tema.
-- Contraste revisado en paneles, controles, estadísticas, diálogos, plano y barra flotante.
-- Exportación PNG/PDF conservada en formato claro.
-- JavaScript validado sin errores de sintaxis.
-- IDs HTML verificados sin duplicados.
-- ZIP verificado.
+## Verificaciones realizadas
+
+- Sintaxis de `app.js` y `optimizer.js`: aprobada.
+- Prueba específica de contraste v5.33: aprobada.
+- Variables de etiquetas en tema claro y oscuro: aprobadas.
+- Aprendizaje visual y sus botones: contraste corregido.
+- Estadísticas e indicador circular de eficiencia: contraste corregido.
+- Insignias del historial reciente: contraste corregido.
+- Tarjetas de resultados de optimización: contraste corregido.
+- Panel Más herramientas y botones secundarios: contraste corregido.
+- Regresión de apilamiento mixto v5.32: aprobada.
+- Caché, manifiesto y número de versión actualizados.
+- Integridad del ZIP: aprobada.
