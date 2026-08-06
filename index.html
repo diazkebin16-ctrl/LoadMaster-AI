@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>LoadMaster AI 5.13 — IMAGE EXPORT</title>
+  <title>LoadMaster AI 5.18 — VISUAL HISTORY</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,14 +12,14 @@
 <header class="topbar">
   <div>
     <h1>LoadMaster AI</h1>
-    <p>Engine v10 · exportación PNG, miniaturas de patrones y búsqueda repetible · v5.13</p>
+    <p>Engine v10 · historial visual, últimos 10 y aprendizaje protegido · v5.18</p>
   </div>
   <button id="installBtn" class="primary" hidden>Instalar</button>
 </header>
 
 <main class="app">
   <aside class="sidebar">
-    <section class="card versionCard"><strong>v5.13 IMAGE EXPORT</strong> · Guarda el plano como PNG y añade una miniatura automática a cada patrón, manteniendo la optimización repetible de v5.12.</section>
+    <section class="card versionCard"><strong>v5.18 VISUAL HISTORY</strong> · Historial manual, últimas 10 optimizaciones y aprendizaje interno protegido.</section>
     <section class="card">
       <h2>Tráiler</h2>
       <label>Modelo guardado
@@ -97,6 +97,22 @@
     </section>
 
 
+    <section class="card">
+      <div class="catalogHeader">
+        <div><h2>Catálogo de pallets</h2><p class="cardHelp">Edita, duplica, elimina, busca o marca favoritos.</p></div>
+        <button id="newCatalogItem" type="button">Nuevo</button>
+      </div>
+      <label>Buscar
+        <input id="catalogSearch" type="search" placeholder="Nombre, medida, tipo o categoría">
+      </label>
+      <div class="catalogToolbar">
+        <button id="exportCatalog" type="button">Exportar catálogo</button>
+        <button id="importCatalog" type="button">Importar catálogo</button>
+      </div>
+      <input id="catalogImportInput" type="file" accept="application/json,.json" hidden>
+      <div id="catalogList" class="catalogList"></div>
+    </section>
+
     <section class="card visualLearningCard">
       <h2>Aprendizaje visual</h2>
       <p class="cardHelp">Importa una captura, reproduce o corrige el acomodo en el tráiler y guárdalo como patrón confirmado.</p>
@@ -107,10 +123,12 @@
       <label>Nombre del patrón
         <input id="patternName" type="text" placeholder="Ej. 34+34+28 — carga real">
       </label>
+      <div id="patternEditStatus" class="patternEditStatus" hidden></div>
       <div class="grid2">
         <button id="learnPatternBtn" class="primary" type="button">Guardar patrón</button>
         <button id="analyzePatternBtn" type="button">Detectar filas</button>
       </div>
+      <button id="cancelPatternEdit" type="button" hidden>Cancelar edición del patrón</button>
       <div class="patternStats"><span>Patrones guardados</span><strong id="patternCount">0</strong></div>
       <div id="patternList" class="patternList"></div>
       <p class="privacyNote">La imagen no se sube a internet. Solo se guarda el patrón geométrico confirmado.</p>
@@ -145,9 +163,56 @@
         <button id="saveLoadBtn">Guardar archivo</button>
         <button id="openLoadBtn">Abrir archivo</button>
         <button id="saveImageBtn">Guardar imagen</button>
-        <button id="printBtn">Imprimir / PDF</button>
+        <button id="printBtn">Imprimir</button>
+        <button id="saveReportBtn" class="primary">Reporte profesional PDF</button>
+        <button id="shareReportBtn">Compartir / WhatsApp</button>
       </div>
       <input id="fileInput" type="file" accept=".json" hidden>
+    </section>
+
+    <section class="card visualHistoryCard">
+      <div class="historyHeader">
+        <div><h2>Historial visual</h2><p class="cardHelp">Guarda manualmente las cargas importantes. La app conserva además las últimas 10 optimizaciones.</p></div>
+        <button id="saveHistoryBtn" type="button" class="primary">Guardar en historial</button>
+      </div>
+      <label>Nombre de la carga
+        <input id="historyName" type="text" placeholder="Ej. Orden 2458 · Cliente A">
+      </label>
+      <h3>Guardadas por mí</h3>
+      <div id="savedHistoryList" class="historyList"></div>
+      <h3>Últimas 10 optimizaciones</h3>
+      <div id="recentHistoryList" class="historyList"></div>
+      <details class="advancedSettings">
+        <summary>Configuración avanzada</summary>
+        <p>El aprendizaje interno ayuda a repetir soluciones exitosas. Restablécelo solamente si hay un problema técnico.</p>
+        <button id="clearInternalLearning" type="button" class="subtleDanger">Restablecer aprendizaje interno</button>
+      </details>
+    </section>
+
+    <!-- Compatibilidad de regresión: v5.16 PATTERNS & STATISTICS -->
+    <section class="card loadStatsCard">
+      <div class="statsCardHeader">
+        <div><h2>Estadísticas de carga</h2><p>Resumen técnico del plano actual.</p></div>
+        <strong id="statsGrade" class="statsGrade">0.0%</strong>
+      </div>
+      <div class="loadStatsGrid">
+        <div><span>Área utilizada</span><strong id="statsUsedArea">0 in²</strong></div>
+        <div><span>Área libre</span><strong id="statsFreeArea">0 in²</strong></div>
+        <div><span>Espacio muerto</span><strong id="statsDeadArea">0 in²</strong></div>
+        <div><span>Huecos internos</span><strong id="statsGapCount">0</strong></div>
+        <div><span>Altura máxima</span><strong id="statsMaxHeight">0 pallets</strong></div>
+        <div><span>Largo restante</span><strong id="statsRemainingLength">0"</strong></div>
+        <div><span>Tiempo de optimización</span><strong id="statsOptimizeTime">—</strong></div>
+        <div><span>Estrategia ganadora</span><strong id="statsWinningStrategy">Manual / sin optimizar</strong></div>
+      </div>
+    </section>
+
+    <section class="card efficiencyCard">
+      <h2>Indicador de eficiencia</h2>
+      <div class="efficiencyLayout">
+        <div id="efficiencyRing" class="efficiencyRing" style="--score:0"><strong id="efficiencyScore">0.0%</strong></div>
+        <div><strong id="efficiencyLabel">Baja</strong><p id="efficiencyExplanation">Agrega una carga para calcular la eficiencia.</p></div>
+      </div>
     </section>
 
     <section class="metrics">
@@ -208,8 +273,27 @@
   </div>
 </div>
 
+<dialog id="catalogDialog" class="catalogDialog">
+  <form method="dialog" onsubmit="return false">
+    <div class="catalogDialogHeader"><h2 id="catalogDialogTitle">Nuevo pallet</h2><button type="button" onclick="document.getElementById('catalogDialog').close()">×</button></div>
+    <input id="catalogEditId" type="hidden">
+    <label>Nombre<input id="catalogName" type="text" required></label>
+    <div class="grid2">
+      <label>Largo<input id="catalogLength" type="number" min="1" required></label>
+      <label>Ancho<input id="catalogWidth" type="number" min="1" required></label>
+      <label>Altura máxima<input id="catalogMaxHeight" type="number" min="1" value="20" required></label>
+      <label>Tipo<select id="catalogType"><option value="4-way">4-way</option><option value="2-way">2-way</option><option value="Block">Block</option><option value="Crate">Crate</option></select></label>
+    </div>
+    <label>Categoría<input id="catalogCategory" type="text" value="Otra"></label>
+    <label>Notas<textarea id="catalogNotes" rows="3"></textarea></label>
+    <label class="checkrow"><input id="catalogCanRotate" type="checkbox" checked> Se puede girar</label>
+    <label class="checkrow"><input id="catalogFavorite" type="checkbox"> Favorito</label>
+    <button id="saveCatalogEdit" class="primary" type="button">Guardar pallet</button>
+  </form>
+</dialog>
+
 <div id="toast" class="toast" aria-live="polite"></div>
 
-<script defer src="app.js?v=5.13-image-solver"></script>
+<script defer src="app.js?v=5.18-visual-history"></script>
 </body>
 </html>

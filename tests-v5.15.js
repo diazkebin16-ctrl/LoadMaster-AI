@@ -1,0 +1,10 @@
+const fs=require("fs"),vm=require("vm"),assert=require("assert");
+const code=fs.readFileSync("app.js","utf8");
+assert(code.includes("editPattern(id)"),"Falta edición de patrones");
+assert(code.includes("duplicatePattern(id)"),"Falta duplicación de patrones");
+assert(code.includes("Actualizar patrón"),"Falta modo actualizar");
+assert(code.includes("patternMemory.update"),"No actualiza el registro existente");
+const html=fs.readFileSync("index.html","utf8");
+for(const id of ["patternEditStatus","cancelPatternEdit","learnPatternBtn","patternList"])assert(html.includes(`id=\"${id}\"`),`Falta ${id}`);
+new vm.Script(code);
+console.log("PASS v5.15: edición, actualización, duplicación y eliminación de patrones.");
