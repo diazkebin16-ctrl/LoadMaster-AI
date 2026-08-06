@@ -1,12 +1,11 @@
-# Test report — v5.30 PHOTO LOAD READER
+# TEST REPORT — v5.31 DARK MODE
 
-- Validación de sintaxis de JavaScript.
-- Botones de cámara y galería conectados.
-- Bloqueo correcto cuando `navigator.onLine` es falso.
-- Redimensionamiento de imágenes antes del envío.
-- Análisis mediante Responses API con entrada de imagen Base64.
-- Parser tolerante a JSON y bloques de código.
-- Tabla de revisión editable y filas de baja confianza resaltadas.
-- Confirmación obligatoria antes de crear pilas.
-- Clave API almacenada únicamente en `sessionStorage`.
-- Entrada manual preservada sin conexión.
+- Selector Claro / Oscuro / Sistema conectado.
+- Preferencia persistente mediante localStorage.
+- Cambio automático al seguir el tema del sistema.
+- Meta theme-color actualizado según el tema.
+- Contraste revisado en paneles, controles, estadísticas, diálogos, plano y barra flotante.
+- Exportación PNG/PDF conservada en formato claro.
+- JavaScript validado sin errores de sintaxis.
+- IDs HTML verificados sin duplicados.
+- ZIP verificado.

@@ -2148,4 +2148,39 @@ function normalizeLibraryItem(raw={}){
 
 
 
+
+// v5.31: tema claro / oscuro / sistema
+(function initThemeController(){
+  const STORAGE_KEY="loadmaster-theme";
+  const root=document.documentElement;
+  const meta=document.querySelector('meta[name="theme-color"]');
+  const media=window.matchMedia?.('(prefers-color-scheme: dark)');
+  const normalize=value=>["light","dark","system"].includes(value)?value:"system";
+  const effective=value=>value==="system"?(media?.matches?"dark":"light"):value;
+  const apply=value=>{
+    const preference=normalize(value);
+    const resolved=effective(preference);
+    root.dataset.theme=resolved;
+    root.dataset.themePreference=preference;
+    if(meta)meta.setAttribute("content",resolved==="dark"?"#020617":"#111827");
+    const select=document.getElementById("themeSelect");
+    if(select&&select.value!==preference)select.value=preference;
+  };
+  let saved="system";
+  try{saved=normalize(localStorage.getItem(STORAGE_KEY)||"system");}catch{}
+  apply(saved);
+  const wire=()=>{
+    const select=document.getElementById("themeSelect");
+    if(!select)return;
+    select.value=saved;
+    select.addEventListener("change",()=>{
+      saved=normalize(select.value);
+      try{localStorage.setItem(STORAGE_KEY,saved);}catch{}
+      apply(saved);
+    });
+  };
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",wire,{once:true});else wire();
+  media?.addEventListener?.("change",()=>{if(saved==="system")apply(saved);});
+})();
+
 new App();

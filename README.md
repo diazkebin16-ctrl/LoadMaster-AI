@@ -1,11 +1,5 @@
-# LoadMaster AI v5.30 PHOTO LOAD READER
+# LoadMaster AI v5.31 DARK MODE
 
-Agrega lectura de órdenes desde cámara o fotografía cuando existe conexión a Internet. La imagen se envía a la API de visión configurada por el usuario y los datos detectados siempre pasan por una tabla editable antes de agregarse a la carga.
+Añade selector de tema Claro / Oscuro / Sistema. La preferencia se guarda localmente y no modifica medidas, posiciones, exportaciones ni el motor de optimización.
 
-## Seguridad y despliegue
-
-Esta aplicación sigue siendo estática. Por seguridad, no incluye una clave de API integrada. El usuario introduce una clave de OpenAI que se conserva únicamente durante la sesión del navegador. Para una distribución comercial, se recomienda reemplazar la llamada directa por un endpoint propio seguro que mantenga la clave en el servidor.
-
-## Sin conexión
-
-La cámara/lectura IA se deshabilita y la carga se agrega manualmente como en versiones anteriores.
+La exportación de imagen y PDF se mantiene con fondo claro para facilitar impresión y compartir.

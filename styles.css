@@ -339,3 +339,81 @@ body.manual-edit-mode .canvasWrap{overflow:hidden}
 .photoReaderDialog::backdrop{background:rgba(15,23,42,.65)}
 .photoReaderDialog form{padding:18px;overflow:auto;max-height:92vh}.photoReaderSetup{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin:12px 0}.securityNote{grid-column:1/-1;margin:0;padding:10px;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:.82rem}.photoPreviewGrid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:16px;align-items:center}.photoPreview{min-height:190px;max-height:360px;display:grid;place-items:center;border:2px dashed #cbd5e1;border-radius:14px;background:#f8fafc;overflow:hidden;color:#64748b}.photoPreview img{width:100%;height:100%;max-height:360px;object-fit:contain}.photoReviewHeader,.photoReviewActions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}.photoTableWrap{overflow:auto;margin-top:8px;border:1px solid #e2e8f0;border-radius:12px}.photoReviewTable{border-collapse:collapse;width:100%;min-width:850px}.photoReviewTable th,.photoReviewTable td{padding:7px;border-bottom:1px solid #e2e8f0;text-align:left}.photoReviewTable th{position:sticky;top:0;background:#f1f5f9;z-index:1}.photoReviewTable input:not([type=checkbox]),.photoReviewTable select{min-width:82px;width:100%;padding:7px}.photoReviewTable tr.lowConfidence{background:#fff7ed}.confidenceBadge{font-weight:800;font-size:.8rem}.photoReviewActions{justify-content:flex-end}.photoReaderDialog button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:680px){.photoReaderSetup,.photoPreviewGrid{grid-template-columns:1fr}.photoReaderDialog{width:98vw}.photoReaderDialog form{padding:12px}}
+
+
+/* v5.31 Dark Mode */
+:root{
+  color-scheme:light;
+  --surface-soft:#f8fafc;
+  --surface-muted:#f3f4f6;
+  --canvas-bg:#dde3ea;
+  --trailer-bg:#ffffff;
+  --topbar:#111827;
+  --topbar-text:#ffffff;
+  --shadow:rgba(15,23,42,.16);
+  --input-bg:#ffffff;
+  --overlay:rgba(255,255,255,.98);
+}
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0b1220;
+  --panel:#111827;
+  --text:#e5e7eb;
+  --muted:#9ca3af;
+  --line:#374151;
+  --accent:#3b82f6;
+  --accent2:#2563eb;
+  --ok:#22c55e;
+  --bad:#ef4444;
+  --lock:#a78bfa;
+  --surface-soft:#0f172a;
+  --surface-muted:#1f2937;
+  --canvas-bg:#172033;
+  --trailer-bg:#f8fafc;
+  --topbar:#020617;
+  --topbar-text:#f8fafc;
+  --shadow:rgba(0,0,0,.45);
+  --input-bg:#0f172a;
+  --overlay:rgba(15,23,42,.98);
+}
+.topbar{background:var(--topbar);color:var(--topbar-text)}
+.topbarActions{display:flex;align-items:center;gap:.65rem}
+.themePicker{display:flex;align-items:center;gap:.45rem;color:#cbd5e1;font-size:.78rem}
+.themePicker span{font-weight:700}
+.themePicker select{width:auto;min-width:94px;padding:.48rem .55rem;border-color:#475569;background:#0f172a;color:#f8fafc}
+.sidebar{background:var(--surface-soft)}
+button{background:var(--input-bg);color:var(--text);border-color:var(--line)}
+input,select,textarea{background:var(--input-bg)!important;color:var(--text)!important;border-color:var(--line)!important}
+.card{border-color:var(--line)}
+.selectedInfo,.metrics>div{background:var(--surface-muted)}
+.canvasWrap,.compactPlanWrap{background:var(--canvas-bg)}
+.bottomTools{background:var(--overlay);box-shadow:0 -8px 22px var(--shadow)}
+.moreToolsBody,.detailsBody{color:var(--text)}
+html[data-theme="dark"] .versionCard,
+html[data-theme="dark"] .optimizerPanel,
+html[data-theme="dark"] .pendingList,
+html[data-theme="dark"] .historyCard,
+html[data-theme="dark"] .catalogManager,
+html[data-theme="dark"] .loadStatistics,
+html[data-theme="dark"] dialog{
+  background:var(--panel);
+  color:var(--text);
+  border-color:var(--line);
+}
+html[data-theme="dark"] .trailer::before{background:rgba(15,23,42,.94);color:#cbd5e1;border-color:#64748b}
+html[data-theme="dark"] .compactPlanHint,
+html[data-theme="dark"] .cardHelp,
+html[data-theme="dark"] .pendingEmpty{color:var(--muted)}
+html[data-theme="dark"] .toast{background:#f8fafc;color:#111827}
+html[data-theme="dark"] .stack{color:#111827}
+html[data-theme="dark"] a{color:#93c5fd}
+html[data-theme="dark"] ::backdrop{background:rgba(2,6,23,.72)}
+@media(max-width:560px){
+  .topbar{align-items:flex-start}
+  .topbarActions{flex-direction:column;align-items:flex-end}
+  .themePicker span{display:none}
+}
+@media print{
+  html[data-theme="dark"]{--bg:#fff;--panel:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;color-scheme:light}
+  .themePicker{display:none!important}
+}
