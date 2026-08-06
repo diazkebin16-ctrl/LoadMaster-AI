@@ -1,11 +1,3 @@
-# LoadMaster AI v5.35 — STABLE STACKING
+# LoadMaster AI v5.36 — STACK FIRST
 
-Reconstruida desde la base estable v5.31 DARK MODE.
-
-- El optimizador principal y `optimizer.js` permanecen iguales a v5.31.
-- “Buscar apilamiento” es un módulo opcional y aislado.
-- Trabaja sobre copias profundas del plano y de la carga pendiente.
-- Solo aplica el resultado si reduce la cantidad de pallets pendientes.
-- Si falla o no mejora, restaura/conserva el plano original.
-- Mantiene el límite de altura más bajo y apoyo completo de la pieza superior.
-- Incluye la corrección de contraste oscuro de v5.33.
+Base estable v5.31. La optimización normal sigue siendo el primer paso. Cuando quedan pallets fuera, **Buscar apilamiento** reconstruye las cantidades originales, forma pilas mixtas compatibles —incluyendo cantidades parciales— y después optimiza el tráiler desde cero. El resultado solo se aplica si carga más pallets que el plano normal.
