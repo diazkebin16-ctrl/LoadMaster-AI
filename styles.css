@@ -552,4 +552,3 @@ html[data-theme="dark"] .photoTableWrap,
 html[data-theme="dark"] .photoReviewTable td{
   border-color:var(--line);
 }
-.autoArrangeToggle{display:flex;align-items:center;gap:.65rem;margin:.25rem 0 .15rem;padding:.75rem .85rem;border:1px solid var(--border,#cbd5e1);border-radius:14px;background:var(--badge-bg,#e5e7eb);color:var(--badge-text,#111827);font-weight:700}.autoArrangeToggle input{width:1.15rem;height:1.15rem}
