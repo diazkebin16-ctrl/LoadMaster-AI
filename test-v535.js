@@ -1,0 +1,10 @@
+const fs=require('fs'),vm=require('vm');
+const base=fs.readFileSync('/mnt/data/lm_v531/optimizer.js','utf8');
+const now=fs.readFileSync('/mnt/data/lm_v535/optimizer.js','utf8');
+if(base!==now) throw new Error('optimizer.js no coincide con la base estable v5.31');
+for(const f of ['app.js','optimizer.js']) new vm.Script(fs.readFileSync('/mnt/data/lm_v535/'+f,'utf8'),{filename:f});
+const html=fs.readFileSync('/mnt/data/lm_v535/index.html','utf8');
+for(const id of ['stackAssistBtn','stackingStatus','optimizeBtn']) if(!html.includes(`id="${id}"`)) throw new Error('Falta '+id);
+const app=fs.readFileSync('/mnt/data/lm_v535/app.js','utf8');
+for(const token of ['mixedStackingPlan(clone(before.stacks)','el plano original se conservó','nextPending>=previousPending']) if(!app.includes(token)) throw new Error('Falta salvaguarda '+token);
+console.log('v5.35 stable stacking: OK');

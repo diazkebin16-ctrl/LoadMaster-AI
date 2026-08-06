@@ -1,14 +1,11 @@
-# LoadMaster AI v5.33 CONTRAST FIX
+# LoadMaster AI v5.35 — STABLE STACKING
 
-Esta versión corrige el contraste visual del modo oscuro sin cambiar las medidas ni el motor de optimización.
+Reconstruida desde la base estable v5.31 DARK MODE.
 
-## Cambios
-
-- Fondo gris oscuro y texto legible en etiquetas y paneles.
-- Corrección de Aprendizaje visual, Guardar patrón y Detectar filas.
-- Corrección de Estadísticas de carga e Indicador de eficiencia.
-- Corrección de las insignias del historial y las últimas 10 optimizaciones.
-- Corrección de Resultados de optimización y Más herramientas.
-- Variables CSS reutilizables para futuras etiquetas.
-- El modo claro, los PDF y las imágenes conservan su apariencia clara.
-- Se mantienen el apilamiento mixto y todas las funciones de v5.32.
+- El optimizador principal y `optimizer.js` permanecen iguales a v5.31.
+- “Buscar apilamiento” es un módulo opcional y aislado.
+- Trabaja sobre copias profundas del plano y de la carga pendiente.
+- Solo aplica el resultado si reduce la cantidad de pallets pendientes.
+- Si falla o no mejora, restaura/conserva el plano original.
+- Mantiene el límite de altura más bajo y apoyo completo de la pieza superior.
+- Incluye la corrección de contraste oscuro de v5.33.
