@@ -1,10 +1,12 @@
-# Test report — v5.36 STACK FIRST
+# Pruebas v5.37
 
-- El optimizador principal permanece separado del flujo opcional de apilamiento.
-- Buscar apilamiento parte de todas las cantidades originales, no del orden del plano actual.
-- Las medidas grandes se usan como base y las pequeñas como capas superiores con apoyo completo.
-- El límite de cada pila mixta es el máximo más bajo de sus capas.
-- Se admiten cantidades parciales para aprovechar sobrantes.
-- Después de formar pilas mixtas, el motor vuelve a optimizar desde cero.
-- El plano normal se restaura si la alternativa apilada no carga más pallets.
-- JavaScript y ZIP validados.
+- `node --check app.js`: OK
+- `node --check optimizer.js`: OK
+- IDs HTML únicos: 170
+- Control `Autoacomodo al agregar`: conectado y persistente
+- Prueba directa de capacidad vertical: OK
+  - base 42×42, cantidad 6, máximo 21
+  - superior 42×34, cantidad 10, máximo 16
+  - resultado: una pila mixta de 16, sin pendientes y sin mover el piso
+- Salvaguarda: si no hay mejora, se conserva el plano normal
+- Se corrigió un error heredado en la comparación de orientaciones (`fitUpperOrientation`)

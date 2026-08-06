@@ -1647,7 +1647,7 @@ function normalizeLibraryItem(raw={}){
   function fitUpperOrientation(upper,support){
     const options=[{w:Number(upper.w),l:Number(upper.l),rotated:false}];
     if(upper.canRotate!==false&&upper.type==='4-way'&&Math.abs(Number(upper.w)-Number(upper.l))>EPS)options.push({w:Number(upper.l),l:Number(upper.w),rotated:true});
-    return options.filter(o=>o.w<=support.w+EPS&&o.l<=support.l+EPS).sort((a,b)=>(support.w*support.l-o.w*o.l)-(support.w*support.l-b.w*b.l))[0]||null;
+    return options.filter(o=>o.w<=support.w+EPS&&o.l<=support.l+EPS).sort((a,b)=>(support.w*support.l-a.w*a.l)-(support.w*support.l-b.w*b.l))[0]||null;
   }
 
   function originalStackGroups(placedInput,pendingInput,library=[]){
@@ -1790,7 +1790,7 @@ function normalizeLibraryItem(raw={}){
 
   class App {
     constructor(){
-      this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[]; this.lastStackingResult=null;
+      this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[]; this.lastStackingResult=null; this.autoArrangeOnAdd=localStorage.getItem("lm_auto_arrange_on_add")!=="0";
       this.bind(); this.syncTrailerInputs(); this.restoreAccordionState(); this.render();
       if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
     }
@@ -1817,6 +1817,7 @@ function normalizeLibraryItem(raw={}){
       $("catalogImportInput").onchange=e=>this.importCatalog(e);
       $("saveCatalogEdit").onclick=e=>{e.preventDefault();this.saveCatalogEditor();};
       $("addPallet").onclick=()=>this.addPallets();
+      if($("autoArrangeOnAdd")){ $("autoArrangeOnAdd").checked=this.autoArrangeOnAdd; $("autoArrangeOnAdd").onchange=e=>{this.autoArrangeOnAdd=!!e.target.checked;localStorage.setItem("lm_auto_arrange_on_add",this.autoArrangeOnAdd?"1":"0");this.toast(this.autoArrangeOnAdd?"Autoacomodo al agregar activado":"Autoacomodo al agregar desactivado");}; }
       $("rotateBtn").onclick=()=>this.rotateSelected(); $("floatRotateBtn").onclick=()=>this.rotateSelected();
       $("lockBtn").onclick=()=>this.toggleLock(); $("floatLockBtn").onclick=()=>this.toggleLock();
       $("duplicateBtn").onclick=()=>this.duplicateSelected();
@@ -1879,7 +1880,7 @@ function normalizeLibraryItem(raw={}){
       const file=e.target.files?.[0];if(!file)return;
       if(!navigator.onLine){e.target.value="";return this.toast("Sin Internet: agrega la carga manualmente");}
       if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size>15*1024*1024){e.target.value="";return this.toast("Usa JPG, PNG o WebP de hasta 15 MB");}
-      try{this.photoReaderFile=file;this.photoReaderDataUrl=await resizeImageDataUrl(file);this.photoReaderItems=[]; this.lastStackingResult=null;const preview=$("photoPreview");preview.innerHTML="";const img=document.createElement("img");img.src=this.photoReaderDataUrl;img.alt="Orden seleccionada";preview.appendChild(img);$("photoReaderStatus").textContent=`Imagen lista: ${file.name}`;$("photoReaderHelp").textContent="Configura la clave de API para analizarla. Los datos no se agregan hasta que los confirmes.";$("photoReviewSection").hidden=true;$("analyzePhotoBtn").disabled=false;$("visionApiKey").value=sessionStorage.getItem("lm_vision_api_key")||"";$("visionModel").value=sessionStorage.getItem("lm_vision_model")||"gpt-5.6";$("photoReaderDialog").showModal();}catch(err){this.toast(err.message||"No se pudo abrir la imagen");}
+      try{this.photoReaderFile=file;this.photoReaderDataUrl=await resizeImageDataUrl(file);this.photoReaderItems=[]; this.lastStackingResult=null; this.autoArrangeOnAdd=localStorage.getItem("lm_auto_arrange_on_add")!=="0";const preview=$("photoPreview");preview.innerHTML="";const img=document.createElement("img");img.src=this.photoReaderDataUrl;img.alt="Orden seleccionada";preview.appendChild(img);$("photoReaderStatus").textContent=`Imagen lista: ${file.name}`;$("photoReaderHelp").textContent="Configura la clave de API para analizarla. Los datos no se agregan hasta que los confirmes.";$("photoReviewSection").hidden=true;$("analyzePhotoBtn").disabled=false;$("visionApiKey").value=sessionStorage.getItem("lm_vision_api_key")||"";$("visionModel").value=sessionStorage.getItem("lm_vision_model")||"gpt-5.6";$("photoReaderDialog").showModal();}catch(err){this.toast(err.message||"No se pudo abrir la imagen");}
     }
     async analyzeLoadPhoto(){
       if(!navigator.onLine)return this.toast("La lectura desde foto requiere Internet");
@@ -1897,8 +1898,8 @@ function normalizeLibraryItem(raw={}){
     }
     confirmPhotoImport(){
       const items=this.photoReaderItems.map(x=>({...x,quantity:Math.max(1,Math.round(Number(x.quantity)||0)),length:Number(x.length)||0,width:Number(x.width)||0,maxHeight:Math.max(1,Math.round(Number(x.maxHeight)||0))})).filter(x=>x.length>0&&x.width>0&&x.quantity>0&&x.maxHeight>0);if(!items.length)return this.toast("No hay filas válidas para agregar");
-      this.store.remember();let stacksAdded=0,palletsAdded=0;for(const item of items){const base={name:item.name||`${item.length}×${item.width}`,w:item.width,l:item.length,type:item.type==="2-way"?"2-way":"4-way",category:item.category||"Otra",canRotate:item.type!=="2-way"&&item.canRotate!==false,locked:false,rotated:false,maxHeight:item.maxHeight};this.splitQty(item.quantity,item.maxHeight).forEach((n,i)=>{this.state.stacks.push({...base,id:uid(),qty:n,x:Math.max(0,Math.min(this.state.trailer.width-item.width,4+(i%2)*(item.width+2))),y:Math.max(0,Geometry.usedLength(this.state.stacks)+2)});stacksAdded++;palletsAdded+=n;});}
-      this.state.selectedId=null;this.render();$("photoReaderDialog").close();this.toast(`${palletsAdded} pallets agregados en ${stacksAdded} pilas. Revisa y optimiza.`);
+      this.store.remember();let palletsAdded=0;const created=[];for(const item of items){const base={name:item.name||`${item.length}×${item.width}`,w:item.width,l:item.length,type:item.type==="2-way"?"2-way":"4-way",category:item.category||"Otra",canRotate:item.type!=="2-way"&&item.canRotate!==false,locked:false,rotated:false,maxHeight:item.maxHeight};this.splitQty(item.quantity,item.maxHeight).forEach(n=>{created.push({...base,id:uid(),qty:n,x:0,y:0});palletsAdded+=n;});}
+      const result=this.addNewStacksWithSoftArrange(created);this.state.selectedId=null;this.render();$("photoReaderDialog").close();this.toast(`${palletsAdded} pallets agregados: ${result.placed} pilas acomodadas${result.pending?` y ${result.pending} pendientes`:''}.`);
     }
     loadReferenceImage(e){
       const file=e.target.files&&e.target.files[0];
@@ -2007,19 +2008,36 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.36",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.37",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
 
+    placementCandidates(stacks,trailer){
+      const xs=new Set([0]),ys=new Set([0]);
+      for(const s of stacks||[]){xs.add(Math.max(0,Number(s.x)||0));xs.add(Math.max(0,(Number(s.x)||0)+(Number(s.w)||0)));ys.add(Math.max(0,Number(s.y)||0));ys.add(Math.max(0,(Number(s.y)||0)+(Number(s.l)||0)));}
+      return {xs:[...xs].filter(x=>x<=trailer.width+EPS).sort((a,b)=>a-b),ys:[...ys].filter(y=>y<=trailer.length+EPS).sort((a,b)=>a-b)};
+    }
+    findSoftPlacement(raw,existing=this.state.stacks){
+      const trailer=this.state.trailer,base=clone(raw),orientations=[{w:Number(base.w),l:Number(base.l),rotated:!!base.rotated}];
+      if(base.type==='4-way'&&base.canRotate!==false&&Math.abs(Number(base.w)-Number(base.l))>EPS)orientations.push({w:Number(base.l),l:Number(base.w),rotated:!base.rotated});
+      const {xs,ys}=this.placementCandidates(existing,trailer);let best=null;
+      for(const o of orientations){for(const y of ys){if(y+o.l>trailer.length+EPS)continue;for(const x of xs){if(x+o.w>trailer.width+EPS)continue;const c={...base,x,y,w:o.w,l:o.l,rotated:o.rotated};if(!Geometry.valid(c,existing,trailer,c.id)){continue;}const score=y*10000+x*10+(o.rotated?1:0);if(!best||score<best.score)best={stack:c,score};}}}
+      return best?.stack||null;
+    }
+    addNewStacksWithSoftArrange(stacks){
+      let placed=0,pending=0;this.state.pending=this.state.pending||[];
+      for(const raw of stacks){const stack={...clone(raw),id:raw.id||uid()};const spot=this.autoArrangeOnAdd?this.findSoftPlacement(stack,this.state.stacks):null;if(spot){this.state.stacks.push(spot);placed++;}else if(this.autoArrangeOnAdd){this.state.pending.push({...stack,x:0,y:0});pending++;}else{stack.x=Math.max(0,Math.min(this.state.trailer.width-stack.w,4));stack.y=Math.max(0,Geometry.usedLength(this.state.stacks)+2);this.state.stacks.push(stack);placed++;}}
+      return {placed,pending};
+    }
     splitQty(total,max){const r=[];while(total>0){const n=Math.min(total,max);r.push(n);total-=n;}return r;}
     addPallets(){
       const w=+$("palletWidth").value,l=+$("palletLength").value,qty=+$("palletQty").value,max=+$("maxHeight").value;
       if(!(w>0&&l>0&&qty>0&&max>0)){this.toast("Revisa las medidas y cantidades");return;}
       this.store.remember();
       const base={name:$("palletName").value.trim()||`${w}×${l}`,w,l,type:$("palletType").value,category:$("category").value,canRotate:$("canRotate").checked,locked:false,rotated:false,maxHeight:max};
-      this.splitQty(qty,max).forEach((n,i)=>this.state.stacks.push({...base,id:uid(),qty:n,x:Math.min(this.state.trailer.width-w,4+(i%2)*(w+2)),y:Math.max(0,Geometry.usedLength(this.state.stacks)+2)}));
-      this.render();
+      const created=this.splitQty(qty,max).map(n=>({...base,id:uid(),qty:n,x:0,y:0}));const result=this.addNewStacksWithSoftArrange(created);this.state.selectedId=null;this.render();
+      if(result.pending)this.toast(`${result.placed} pilas autoacomodadas; ${result.pending} quedaron pendientes`);else this.toast(this.autoArrangeOnAdd?`${result.placed} pilas autoacomodadas`:`${result.placed} pilas agregadas`);
     }
     rotateSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");if(s.locked)return this.toast("La pila está bloqueada");if(Array.isArray(s.layers)&&s.layers.length>1)return this.toast("Una pila mixta no se gira como bloque; sepárala antes de cambiar su orientación");if(s.type!=="4-way"||!s.canRotate)return this.toast("Esta pila no puede girarse");this.store.remember();[s.w,s.l]=[s.l,s.w];s.rotated=!s.rotated;this.render();}
     toggleLock(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();s.locked=!s.locked;this.render();}
@@ -2040,6 +2058,14 @@ function normalizeLibraryItem(raw={}){
       this.toast("Buscando una solución que primero apile y después acomode");
       await new Promise(resolve=>setTimeout(resolve,40));
       try{
+        if(status)status.textContent="Revisando capacidad vertical disponible en las pilas actuales…";
+        const direct=mixedStackingPlan(before.stacks,before.pending,this.state.library,this.state.trailer);
+        const directLoaded=direct.ok?direct.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0):baselinePallets;
+        if(direct.ok&&directLoaded>baselinePallets){
+          const validation=validateLayout(direct.stacks,this.state.trailer);if(!validation.ok)throw new Error(explainValidation(validation));
+          this.store.remember();this.state.stacks=clone(direct.stacks);this.state.pending=clone(direct.pending||[]);this.state.selectedId=null;this.lastStackingResult={...direct,name:'Capacidad vertical disponible',family:'Apilamiento directo'};this.lastWinningStrategy='Capacidad vertical disponible';this.lastOptimizationMs=0;this.render();
+          const gained=directLoaded-baselinePallets,left=totalPallets-directLoaded;if(status)status.textContent=left?`Se aprovecharon ${gained} espacios verticales; quedan ${left} pallets pendientes.`:`Carga completa aprovechando capacidad vertical.`;this.toast(`Apilamiento aplicado sin mover el piso: ${gained} pallets adicionales`);return;
+        }
         const profiles=['tight','balanced','upper-heavy','base-heavy','large-base'];
         const candidates=[];
         for(let i=0;i<profiles.length;i++){
@@ -2123,7 +2149,7 @@ function normalizeLibraryItem(raw={}){
       const saved=this.filterAndSortHistory(this.visualHistory.saved,false),recent=this.filterAndSortHistory(this.visualHistory.recent,true);$('savedHistoryCount').textContent=`(${saved.length})`;$('recentHistoryCount').textContent=`(${recent.length})`;renderList($('savedHistoryList'),this.visualHistory.saved,false);renderList($('recentHistoryList'),this.visualHistory.recent,true);this.updateHistorySelectionToolbar();this.updateHistorySummary();
     }
     createHistoryReportCanvas(entry){
-      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.32',620,1730);return canvas;
+      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.37',620,1730);return canvas;
     }
     exportHistoryEntriesPdf(entries){try{const valid=(entries||[]).slice(0,10);if(!valid.length)return this.toast('Selecciona al menos una carga');const blob=canvasesToPdfBlob(valid.map(e=>this.createHistoryReportCanvas(e))),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-reportes-${new Date().toISOString().slice(0,10)}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);this.toast(`${valid.length} reporte${valid.length===1?'':'s'} exportado${valid.length===1?'':'s'} en PDF`);}catch(error){this.toast(error.message||'No se pudieron crear los reportes');}}
     exportSelectedHistoryPdf(){this.exportHistoryEntriesPdf(this.getSelectedHistoryEntries());}
@@ -2242,7 +2268,7 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.36",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.32.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.37",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.32.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
