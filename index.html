@@ -7,13 +7,26 @@
 <meta content="#111827" name="theme-color"/>
 <title>LoadMaster AI 5.38 — PRESTACK ANYTIME</title>
 <link href="manifest.webmanifest" rel="manifest"/>
-<link href="styles.css" rel="stylesheet"/>
+<script>
+(function(){
+  const RELEASE="5.39.1";
+  const key="loadmaster-release";
+  try {
+    if(localStorage.getItem(key)!==RELEASE){
+      localStorage.setItem(key,RELEASE);
+      if("caches" in window) caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith("loadmaster-ai-")).map(k=>caches.delete(k))));
+      if("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(r=>r.unregister())));
+    }
+  } catch(e){}
+})();
+</script>
+<link href="styles.css?v=5.39.1" rel="stylesheet"/>
 </head>
 <body>
 <header class="topbar">
 <div>
 <h1>LoadMaster AI</h1>
-<p>Engine v14 · acomodo normal primero · apilamiento previo opcional · v5.38</p>
+<p>Engine v14 · acomodo normal primero · apilamiento solo si hace falta · v5.39.1</p>
 </div>
 <div class="topbarActions">
 <label class="themePicker" for="themeSelect"><span>Tema</span><select id="themeSelect" aria-label="Tema de la aplicación"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label>
@@ -295,6 +308,6 @@
 </form>
 </dialog>
 <div aria-live="polite" class="toast" id="toast"></div>
-<script defer="" src="app.js?v=5.36-stack-first"></script>
+<script defer="" src="app.js?v=5.39.1"></script>
 </body>
 </html>
