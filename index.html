@@ -9,7 +9,7 @@
 <link href="manifest.webmanifest" rel="manifest"/>
 <script>
 (function(){
-  const RELEASE="5.39.1";
+  const RELEASE="5.40";
   const key="loadmaster-release";
   try {
     if(localStorage.getItem(key)!==RELEASE){
@@ -20,20 +20,20 @@
   } catch(e){}
 })();
 </script>
-<link href="styles.css?v=5.39.1" rel="stylesheet"/>
+<link href="styles.css?v=5.40" rel="stylesheet"/>
 </head>
 <body>
 <header class="topbar">
 <div>
 <h1>LoadMaster AI</h1>
-<p>Engine v14 · acomodo normal primero · apilamiento solo si hace falta · v5.39.1</p>
+<p>Engine v14 · acomodo normal primero · apilamiento solo si hace falta · v5.40</p>
 </div>
 <div class="topbarActions">
 <label class="themePicker" for="themeSelect"><span>Tema</span><select id="themeSelect" aria-label="Tema de la aplicación"><option value="system">Sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select></label>
 <button class="primary" hidden="" id="installBtn">Instalar</button>
 </div>
 </header>
-<main class="app"><aside class="sidebar sidebarTop"><section class="card versionCard"><strong>v5.39 NORMAL FIRST</strong> · Primero intenta acomodar toda la carga sin apilar. Buscar apilamiento se habilita únicamente después de optimizar cuando todavía quedan pallets pendientes.</section><details class="card collapsibleCard accordionPanel" id="trailerSettings">
+<main class="app"><aside class="sidebar sidebarTop"><section class="card versionCard"><strong>v5.40 PRESTACK COUNT FIX</strong> · Buscar apilamiento funciona antes o después de optimizar. Cuando una pila es absorbida, desaparece del inventario y el conteo total se reduce.</section><details class="card collapsibleCard accordionPanel" id="trailerSettings">
 <summary><span>Configuración del tráiler</span><small id="trailerSummary">96 × 628 pulg.</small></summary>
 <div class="detailsBody">
 <label>Modelo guardado
@@ -59,7 +59,7 @@
 </div>
 <button id="applyTrailer">Aplicar</button>
 </div>
-</details><section class="card quickToolsCard" id="quickToolsCard"><h2>Herramientas</h2><p class="cardHelp">Acciones principales para optimizar y revisar la carga.</p><div class="primaryToolGrid"><button class="primary" id="optimizeBtn">Optimización IA</button><button id="retryOptimizeBtn" type="button">Reintentar</button><button id="compactBtn">Compactar</button><button id="stackAssistBtn" type="button" disabled>Buscar apilamiento</button><button class="primary" id="manualModeBtn" type="button">Acomodar manualmente</button><button hidden="" id="finishManualBtn" type="button">Finalizar edición</button></div><details class="moreTools"><summary>Más herramientas</summary><div class="moreToolsBody"><div class="buttonGrid"><button id="undoBtn">Deshacer</button><button id="redoBtn">Rehacer</button><button id="clearBtn">Vaciar carga</button><button id="demoBtn">Cargar ejemplo</button></div><h3>Entrada inteligente</h3><p class="cardHelp">Disponible únicamente con Internet. Sin conexión puedes continuar agregando pallets manualmente.</p><div class="buttonGrid"><button class="primary" id="scanCameraBtn" type="button">Tomar foto de la orden</button><button id="scanGalleryBtn" type="button">Elegir foto</button></div><input accept="image/jpeg,image/png,image/webp" capture="environment" hidden id="scanCameraInput" type="file"/><input accept="image/jpeg,image/png,image/webp" hidden id="scanGalleryInput" type="file"/><h3>Guardar / exportar</h3><input accept=".json" hidden="" id="fileInput" type="file"/><div class="buttonGrid"><button id="saveLoadBtn">Guardar archivo</button><button id="openLoadBtn">Abrir archivo</button><button id="saveImageBtn">Guardar imagen</button><button id="printBtn">Imprimir</button><button class="primary" id="saveReportBtn">Reporte profesional PDF</button><button id="shareReportBtn">Compartir / WhatsApp</button></div></div></details></section></aside><section class="workspace">
+</details><section class="card quickToolsCard" id="quickToolsCard"><h2>Herramientas</h2><p class="cardHelp">Acciones principales para optimizar y revisar la carga.</p><div class="primaryToolGrid"><button class="primary" id="optimizeBtn">Optimización IA</button><button id="retryOptimizeBtn" type="button">Reintentar</button><button id="compactBtn">Compactar</button><button id="stackAssistBtn" type="button">Buscar apilamiento</button><button class="primary" id="manualModeBtn" type="button">Acomodar manualmente</button><button hidden="" id="finishManualBtn" type="button">Finalizar edición</button></div><details class="moreTools"><summary>Más herramientas</summary><div class="moreToolsBody"><div class="buttonGrid"><button id="undoBtn">Deshacer</button><button id="redoBtn">Rehacer</button><button id="clearBtn">Vaciar carga</button><button id="demoBtn">Cargar ejemplo</button></div><h3>Entrada inteligente</h3><p class="cardHelp">Disponible únicamente con Internet. Sin conexión puedes continuar agregando pallets manualmente.</p><div class="buttonGrid"><button class="primary" id="scanCameraBtn" type="button">Tomar foto de la orden</button><button id="scanGalleryBtn" type="button">Elegir foto</button></div><input accept="image/jpeg,image/png,image/webp" capture="environment" hidden id="scanCameraInput" type="file"/><input accept="image/jpeg,image/png,image/webp" hidden id="scanGalleryInput" type="file"/><h3>Guardar / exportar</h3><input accept=".json" hidden="" id="fileInput" type="file"/><div class="buttonGrid"><button id="saveLoadBtn">Guardar archivo</button><button id="openLoadBtn">Abrir archivo</button><button id="saveImageBtn">Guardar imagen</button><button id="printBtn">Imprimir</button><button class="primary" id="saveReportBtn">Reporte profesional PDF</button><button id="shareReportBtn">Compartir / WhatsApp</button></div></div></details></section></aside><section class="workspace">
 <div class="workspaceTop">
 <div>
 <strong id="planModeTitle">Plano compacto</strong>
@@ -308,6 +308,6 @@
 </form>
 </dialog>
 <div aria-live="polite" class="toast" id="toast"></div>
-<script defer="" src="app.js?v=5.39.1"></script>
+<script defer="" src="app.js?v=5.40"></script>
 </body>
 </html>

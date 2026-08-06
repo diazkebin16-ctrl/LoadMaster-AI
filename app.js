@@ -1723,6 +1723,53 @@ function normalizeLibraryItem(raw={}){
     }
     return [...mixed,...normals];
   }
+
+  function prestackInventoryPlan(stacksInput,pendingInput,library=[]){
+    const placed=Geometry.clone(stacksInput||[]);
+    const pending=Geometry.clone(pendingInput||[]);
+    const inventory=[...placed.map(s=>({...s,_wasPlaced:true})),...pending.map(s=>({...s,_wasPlaced:false}))];
+    const actions=[];
+    let changed=true,guard=0;
+    while(changed&&guard++<500){
+      changed=false;
+      let best=null;
+      for(let bi=0;bi<inventory.length;bi++){
+        const base=inventory[bi];
+        if(base.locked)continue;
+        const support=topSupportFor(base,library);
+        const current=support.layers.reduce((n,x)=>n+(Number(x.qty)||1),0);
+        for(let ui=0;ui<inventory.length;ui++){
+          if(ui===bi)continue;
+          const upper=inventory[ui];
+          if(upper.locked||Array.isArray(upper.layers)&&upper.layers.length>1)continue;
+          const orientation=fitUpperOrientation(upper,support);
+          if(!orientation)continue;
+          const limit=Math.min(...support.layers.map(x=>Math.max(1,Number(x.maxHeight)||1)),libraryMaxHeightFor(upper,library));
+          const capacity=Math.max(0,limit-current);
+          if(capacity<=0)continue;
+          const qty=Math.max(1,Number(upper.qty)||1);
+          const take=Math.min(capacity,qty);
+          if(take<=0)continue;
+          const full=take>=qty;
+          const waste=support.w*support.l-orientation.w*orientation.l;
+          const score=(full?0:100000)+waste*1000-capacity-take*10;
+          if(!best||score<best.score)best={bi,ui,base,upper,orientation,limit,current,capacity,take,qty,full,score};
+        }
+      }
+      if(!best)break;
+      const {bi,ui,base,upper,orientation,limit,current,take,qty,full}=best;
+      const layers=stackLayersFor(base,library);
+      layers.push({id:`${upper.id||uid()}-prelayer-${layers.length+1}`,sourceId:upper.id,name:upper.name,w:orientation.w,l:orientation.l,qty:take,maxHeight:libraryMaxHeightFor(upper,library),type:upper.type||'4-way',canRotate:upper.canRotate!==false,category:upper.category||'Otra',rotated:orientation.rotated});
+      base.layers=layers;base.qty=current+take;base.maxHeight=limit;base.stackMode='mixed';base.stackLimit=limit;base.mixedStacking=true;
+      actions.push({baseId:base.id,upperId:upper.id,baseName:base.name,upperName:upper.name,qty:take,full});
+      if(full){inventory.splice(ui,1);}else{upper.qty=qty-take;}
+      changed=true;
+    }
+    const stacks=inventory.filter(x=>x._wasPlaced).map(({_wasPlaced,...x})=>x);
+    const pendingOut=inventory.filter(x=>!x._wasPlaced).map(({_wasPlaced,...x})=>x);
+    return {stacks,pending:pendingOut,actions,removedStacks:actions.filter(a=>a.full).length,stackedPallets:actions.reduce((n,a)=>n+a.qty,0)};
+  }
+
   function mixedStackingPlan(placedInput,pendingInput,library=[],trailer={width:96,length:628}){
     const placed=Geometry.clone(placedInput||[]),pending=Geometry.clone(pendingInput||[]);
     const actions=[];
@@ -1816,7 +1863,7 @@ function normalizeLibraryItem(raw={}){
     constructor(){
       this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[]; this.lastStackingResult=null; this.hasOptimized=false;
       this.bind(); this.syncTrailerInputs(); this.restoreAccordionState(); this.render();
-      if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js?v=5.39.1", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+      if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js?v=5.40", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
     }
     get state(){return this.store.state;}
     toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2100);}
@@ -2031,7 +2078,7 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.39",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.40",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
@@ -2061,9 +2108,41 @@ function normalizeLibraryItem(raw={}){
     redo(){if(!this.store.future.length)return;this.store.history.push(this.store.snapshot());this.store.restore(this.store.future.pop());this.syncTrailerInputs();this.render();}
     async searchMixedStacking(){
       const status=$("stackingStatus"),button=$("stackAssistBtn");
+      const hasAny=(this.state.stacks||[]).length+(this.state.pending||[]).length>0;
+      if(!hasAny){
+        if(status)status.textContent="Agrega pilas antes de buscar apilamiento.";
+        return this.toast("No hay pilas para apilar");
+      }
       if(!this.hasOptimized){
-        if(status)status.textContent="Primero ejecuta Optimización IA sin apilar.";
-        return this.toast("Primero intenta acomodar toda la carga sin apilar");
+        if(this.progressiveSession)this.stopProgressiveOptimization(true);
+        if(button)button.disabled=true;
+        const before=clone({stacks:this.state.stacks,pending:this.state.pending,selectedId:this.state.selectedId});
+        try{
+          if(status)status.textContent="Preparando pilas mixtas antes de optimizar…";
+          const plan=prestackInventoryPlan(before.stacks,before.pending,this.state.library);
+          if(!plan.actions.length){
+            if(status)status.textContent="No se encontraron combinaciones compatibles antes de optimizar.";
+            return this.toast("No se encontró un apilamiento compatible");
+          }
+          const beforeCount=before.stacks.length+before.pending.length;
+          const afterCount=plan.stacks.length+plan.pending.length;
+          this.store.remember();
+          this.state.stacks=clone(plan.stacks);
+          this.state.pending=clone(plan.pending);
+          this.state.selectedId=null;
+          this.lastStackingResult={mode:"prestack",...plan};
+          this.lastWinningStrategy="Apilamiento previo";
+          this.render();
+          const reduced=beforeCount-afterCount;
+          if(status)status.textContent=`Apilamiento previo listo: ${plan.stackedPallets} pallets integrados; ${beforeCount} → ${afterCount} pilas.`;
+          return this.toast(`Apilamiento listo: ${reduced>0?`${reduced} pila${reduced===1?'':'s'} menos`:`${plan.stackedPallets} pallets integrados`}`);
+        }catch(error){
+          this.state.stacks=before.stacks;this.state.pending=before.pending;this.state.selectedId=before.selectedId;this.render();
+          if(status)status.textContent="No se pudo preparar el apilamiento; la carga original se conservó.";
+          return this.toast(`No se pudo preparar el apilamiento: ${error?.message||'error desconocido'}`);
+        }finally{
+          if(button)button.disabled=!((this.state.stacks||[]).length+(this.state.pending||[]).length);
+        }
       }
       if(!(this.state.pending||[]).length){
         if(status)status.textContent="La carga ya está completa; no hay pendientes para apilar.";
@@ -2141,15 +2220,15 @@ function normalizeLibraryItem(raw={}){
         if(status)status.textContent="El apilamiento fue rechazado y el plano normal se conservó.";
         this.toast(`No se pudo completar el apilamiento: ${error?.message||"error desconocido"}`);
       }finally{
-        if(button)button.disabled=!(this.hasOptimized&&(this.state.pending||[]).length);
+        if(button)button.disabled=!((this.state.stacks||[]).length+(this.state.pending||[]).length);
       }
     }
 
     renderPending(){
       const root=$("pendingList"),count=$("pendingCount");if(!root||!count)return;
-      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";const stackBtn=$("stackAssistBtn");if(stackBtn)stackBtn.disabled=!(this.hasOptimized&&pending.length);
-      if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';const status=$("stackingStatus");if(status)status.textContent=this.hasOptimized?"La carga no tiene pendientes para apilar.":"Primero ejecuta Optimización IA sin apilar.";return;}
-      {const status=$("stackingStatus");if(status)status.textContent=this.hasOptimized?"La carga normal dejó pendientes. Puedes usar Buscar apilamiento como segundo recurso.":"Primero ejecuta Optimización IA sin apilar.";}
+      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";const stackBtn=$("stackAssistBtn");if(stackBtn)stackBtn.disabled=!((this.state.stacks||[]).length+pending.length);
+      if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';const status=$("stackingStatus");if(status)status.textContent=this.hasOptimized?"La carga no tiene pendientes para apilar.":((this.state.stacks||[]).length?"Puedes preparar pilas mixtas antes de optimizar.":"Agrega pilas antes de buscar apilamiento.");return;}
+      {const status=$("stackingStatus");if(status)status.textContent=this.hasOptimized?"La carga normal dejó pendientes. Puedes usar Buscar apilamiento como segundo recurso.":"Puedes preparar pilas mixtas antes de pulsar Optimización IA.";}
       pending.forEach(s=>{const row=document.createElement("div");row.className="pendingItem";row.innerHTML=`<div><strong>${s.name}</strong><small>${s.w}×${s.l} · ${s.qty||1} pallets · máx ${libraryMaxHeightFor(s,this.state.library)} · ${s.type}</small></div><button type="button" data-edit>Editar</button>`;row.querySelector("[data-edit]").onclick=()=>this.editPending(s.id);root.appendChild(row);});
     }
     editPending(id){
@@ -2192,7 +2271,7 @@ function normalizeLibraryItem(raw={}){
       const saved=this.filterAndSortHistory(this.visualHistory.saved,false),recent=this.filterAndSortHistory(this.visualHistory.recent,true);$('savedHistoryCount').textContent=`(${saved.length})`;$('recentHistoryCount').textContent=`(${recent.length})`;renderList($('savedHistoryList'),this.visualHistory.saved,false);renderList($('recentHistoryList'),this.visualHistory.recent,true);this.updateHistorySelectionToolbar();this.updateHistorySummary();
     }
     createHistoryReportCanvas(entry){
-      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.32',620,1730);return canvas;
+      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.40',620,1730);return canvas;
     }
     exportHistoryEntriesPdf(entries){try{const valid=(entries||[]).slice(0,10);if(!valid.length)return this.toast('Selecciona al menos una carga');const blob=canvasesToPdfBlob(valid.map(e=>this.createHistoryReportCanvas(e))),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-reportes-${new Date().toISOString().slice(0,10)}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);this.toast(`${valid.length} reporte${valid.length===1?'':'s'} exportado${valid.length===1?'':'s'} en PDF`);}catch(error){this.toast(error.message||'No se pudieron crear los reportes');}}
     exportSelectedHistoryPdf(){this.exportHistoryEntriesPdf(this.getSelectedHistoryEntries());}
@@ -2311,7 +2390,7 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.hasOptimized=false;this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.39",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.32.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.40",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.40.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
@@ -2433,7 +2512,7 @@ function normalizeLibraryItem(raw={}){
 
 
 
-// v5.38: apilamiento disponible antes y después de optimizar + autoacomodo suave
+// v5.40: apilamiento disponible antes y después de optimizar + autoacomodo suave
 (function initThemeController(){
   const STORAGE_KEY="loadmaster-theme";
   const root=document.documentElement;

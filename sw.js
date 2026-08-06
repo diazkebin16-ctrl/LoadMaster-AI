@@ -1,8 +1,8 @@
-const CACHE="loadmaster-ai-v5.39.1-normal-first";
+const CACHE="loadmaster-ai-v5.40-prestack-count-fix";
 const ASSETS=[
-  "./index.html?v=5.39.1",
-  "./styles.css?v=5.39.1",
-  "./app.js?v=5.39.1",
+  "./index.html?v=5.40",
+  "./styles.css?v=5.40",
+  "./app.js?v=5.40",
   "./manifest.webmanifest",
   "./icon.svg",
   "./optimizer.js",
@@ -24,9 +24,9 @@ self.addEventListener("fetch", event => {
   if(request.mode === "navigate") {
     event.respondWith(fetch(request, {cache:"no-store"}).then(response => {
       const copy=response.clone();
-      caches.open(CACHE).then(cache=>cache.put("./index.html?v=5.39.1", copy));
+      caches.open(CACHE).then(cache=>cache.put("./index.html?v=5.40", copy));
       return response;
-    }).catch(()=>caches.match("./index.html?v=5.39.1")));
+    }).catch(()=>caches.match("./index.html?v=5.40")));
     return;
   }
   event.respondWith(fetch(request).then(response => {
