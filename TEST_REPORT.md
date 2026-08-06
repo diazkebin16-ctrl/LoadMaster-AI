@@ -1,11 +1,10 @@
-# Pruebas v5.38
+# Informe de pruebas v5.38
 
-- `node --check app.js`: OK
-- `node --check optimizer.js`: OK
-- IDs HTML únicos: 170
-- Botón `Buscar apilamiento` disponible antes de optimizar: OK
-- Preparación previa conserva la cantidad total de pallets: OK
-- Caso 42×42 (6) + 42×34 (10), límite menor 16: crea pila mixta válida
-- Flujo posterior de capacidad vertical v5.37: OK
-- Al agregar carga nueva se reinicia el estado de optimización: OK
-- Pruebas específicas de preparación previa y capacidad vertical posterior: OK
+- `app.js`: sintaxis válida con `node --check`.
+- `optimizer.js`: sintaxis válida con `node --check`.
+- 169 identificadores HTML únicos.
+- 166 referencias `$()` de JavaScript conectadas a elementos existentes.
+- Botón Buscar apilamiento sin atributo `disabled` inicial.
+- Prueba específica `test-v538.js`: aprobada.
+- Pruebas heredadas v5.24 y v5.30: aprobadas.
+- Algunas pruebas antiguas v5.27-v5.29 no son reutilizables sin modificación porque exigen literalmente su número de versión anterior.
