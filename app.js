@@ -2008,7 +2008,7 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.37",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.38",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
@@ -2026,6 +2026,7 @@ function normalizeLibraryItem(raw={}){
       return best?.stack||null;
     }
     addNewStacksWithSoftArrange(stacks){
+      this.lastSolutions=[];this.lastOptimizationMs=0;this.lastWinningStrategy="Manual / sin optimizar";
       let placed=0,pending=0;this.state.pending=this.state.pending||[];
       for(const raw of stacks){const stack={...clone(raw),id:raw.id||uid()};const spot=this.autoArrangeOnAdd?this.findSoftPlacement(stack,this.state.stacks):null;if(spot){this.state.stacks.push(spot);placed++;}else if(this.autoArrangeOnAdd){this.state.pending.push({...stack,x:0,y:0});pending++;}else{stack.x=Math.max(0,Math.min(this.state.trailer.width-stack.w,4));stack.y=Math.max(0,Geometry.usedLength(this.state.stacks)+2);this.state.stacks.push(stack);placed++;}}
       return {placed,pending};
@@ -2045,9 +2046,47 @@ function normalizeLibraryItem(raw={}){
     deleteSelected(){const s=this.selected();if(!s)return this.toast("Selecciona una pila");this.store.remember();this.state.stacks=this.state.stacks.filter(x=>x.id!==s.id);this.state.selectedId=null;this.render();}
     undo(){if(!this.store.history.length)return;this.store.future.push(this.store.snapshot());this.store.restore(this.store.history.pop());this.syncTrailerInputs();this.render();}
     redo(){if(!this.store.future.length)return;this.store.history.push(this.store.snapshot());this.store.restore(this.store.future.pop());this.syncTrailerInputs();this.render();}
+    prepareMixedStacksBeforeOptimization(){
+      const allCargo=[...(this.state.stacks||[]),...(this.state.pending||[])];
+      if(!allCargo.length)return this.toast("Agrega pallets antes de preparar el apilamiento");
+      const profiles=['tight','balanced','upper-heavy','base-heavy','large-base'];
+      const totalPallets=allCargo.reduce((n,s)=>n+(Number(s.qty)||1),0);
+      const candidates=[];
+      for(const profile of profiles){
+        const input=buildStackingFirstLoad(this.state.stacks||[],this.state.pending||[],this.state.library,profile);
+        const mixedCount=input.filter(s=>Array.isArray(s.layers)&&s.layers.length>1).length;
+        const checkTotal=input.reduce((n,s)=>n+(Number(s.qty)||1),0);
+        if(!mixedCount||checkTotal!==totalPallets)continue;
+        const footprint=input.reduce((n,s)=>n+Number(s.w||0)*Number(s.l||0),0);
+        candidates.push({profile,input,mixedCount,score:input.length*1e6+footprint});
+      }
+      candidates.sort((a,b)=>a.score-b.score||b.mixedCount-a.mixedCount);
+      const best=candidates[0];
+      if(!best)return this.toast("No se encontraron combinaciones compatibles para apilar");
+      const placed=[],pending=[];
+      const ordered=[...best.input].sort((a,b)=>b.w*b.l-a.w*a.l||b.qty-a.qty);
+      for(const raw of ordered){
+        const stack={...clone(raw),id:raw.id||uid()};
+        const spot=this.findSoftPlacement(stack,placed);
+        if(spot)placed.push(spot);else pending.push({...stack,x:0,y:0});
+      }
+      const loaded=placed.reduce((n,s)=>n+(Number(s.qty)||1),0),left=totalPallets-loaded;
+      this.store.remember();
+      this.state.stacks=placed;this.state.pending=pending;this.state.selectedId=null;
+      this.lastSolutions=[];this.lastOptimizationMs=0;this.lastWinningStrategy='Pilas mixtas preparadas · sin optimizar';
+      this.lastStackingResult={name:`Preparación previa · ${best.profile}`,family:'Apilamiento previo manual',stacks:clone(placed),unplaced:clone(pending),mixedCount:best.mixedCount};
+      this.render();
+      const status=$("stackingStatus");
+      if(status)status.textContent=left?`Se prepararon ${best.mixedCount} pilas mixtas antes de optimizar; ${left} pallets esperan acomodo.`:`Se prepararon ${best.mixedCount} pilas mixtas. Ahora puedes pulsar Optimización IA.`;
+      this.toast(`Apilamiento preparado: ${best.mixedCount} pila${best.mixedCount===1?'':'s'} mixta${best.mixedCount===1?'':'s'}`);
+    }
     async searchMixedStacking(){
-      if(!(this.state.pending||[]).length)return this.toast("No hay carga pendiente para apilar");
-      if(!this.state.stacks.length)return this.toast("Primero ejecuta la optimización normal");
+      const hasCargo=(this.state.stacks||[]).length||(this.state.pending||[]).length;
+      if(!hasCargo)return this.toast("Agrega pallets antes de buscar apilamiento");
+      const hasOptimizedPlan=Array.isArray(this.lastSolutions)&&this.lastSolutions.length>0;
+      if(!hasOptimizedPlan)return this.prepareMixedStacksBeforeOptimization();
+      if(!(this.state.pending||[]).length)return this.toast("La carga ya está completa; no hay pendientes para apilar");
+      if(!this.state.stacks.length)return this.toast("No hay una base acomodada para aprovechar capacidad vertical");
       if(this.progressiveSession)this.stopProgressiveOptimization(true);
       const before=clone({stacks:this.state.stacks,pending:this.state.pending,selectedId:this.state.selectedId});
       const baselinePallets=before.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0);
@@ -2100,12 +2139,12 @@ function normalizeLibraryItem(raw={}){
         this.state.stacks=before.stacks;this.state.pending=before.pending;this.state.selectedId=before.selectedId;this.render();
         if(status)status.textContent="El apilamiento fue rechazado y el plano normal se conservó.";
         this.toast(`No se pudo completar el apilamiento: ${error?.message||'error desconocido'}`);
-      }finally{if(button)button.disabled=!(this.state.pending||[]).length||!this.state.stacks.length;}
+      }finally{if(button)button.disabled=!((this.state.stacks||[]).length||(this.state.pending||[]).length);}
     }
 
     renderPending(){
       const root=$("pendingList"),count=$("pendingCount");if(!root||!count)return;
-      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";const stackBtn=$("stackAssistBtn");if(stackBtn)stackBtn.disabled=!pending.length||!this.state.stacks.length;
+      const pending=this.state.pending||[];count.textContent=pending.length;root.innerHTML="";const stackBtn=$("stackAssistBtn");if(stackBtn)stackBtn.disabled=!((this.state.stacks||[]).length||pending.length);
       if(!pending.length){root.innerHTML='<div class="pendingEmpty">No hay pilas pendientes.</div>';const status=$("stackingStatus");if(status)status.textContent="El apilamiento solo se ejecuta cuando tú pulsas “Buscar apilamiento”.";return;}
       pending.forEach(s=>{const row=document.createElement("div");row.className="pendingItem";row.innerHTML=`<div><strong>${s.name}</strong><small>${s.w}×${s.l} · ${s.qty||1} pallets · máx ${libraryMaxHeightFor(s,this.state.library)} · ${s.type}</small></div><button type="button" data-edit>Editar</button>`;row.querySelector("[data-edit]").onclick=()=>this.editPending(s.id);root.appendChild(row);});
     }
@@ -2149,7 +2188,7 @@ function normalizeLibraryItem(raw={}){
       const saved=this.filterAndSortHistory(this.visualHistory.saved,false),recent=this.filterAndSortHistory(this.visualHistory.recent,true);$('savedHistoryCount').textContent=`(${saved.length})`;$('recentHistoryCount').textContent=`(${recent.length})`;renderList($('savedHistoryList'),this.visualHistory.saved,false);renderList($('recentHistoryList'),this.visualHistory.recent,true);this.updateHistorySelectionToolbar();this.updateHistorySummary();
     }
     createHistoryReportCanvas(entry){
-      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.37',620,1730);return canvas;
+      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.38',620,1730);return canvas;
     }
     exportHistoryEntriesPdf(entries){try{const valid=(entries||[]).slice(0,10);if(!valid.length)return this.toast('Selecciona al menos una carga');const blob=canvasesToPdfBlob(valid.map(e=>this.createHistoryReportCanvas(e))),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-reportes-${new Date().toISOString().slice(0,10)}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);this.toast(`${valid.length} reporte${valid.length===1?'':'s'} exportado${valid.length===1?'':'s'} en PDF`);}catch(error){this.toast(error.message||'No se pudieron crear los reportes');}}
     exportSelectedHistoryPdf(){this.exportHistoryEntriesPdf(this.getSelectedHistoryEntries());}
@@ -2268,7 +2307,7 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.37",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.32.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.38",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.38.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
@@ -2390,7 +2429,7 @@ function normalizeLibraryItem(raw={}){
 
 
 
-// v5.36: primero apila cantidades compatibles y después vuelve a optimizar
+// v5.38: Buscar apilamiento funciona antes y después de la optimización
 (function initThemeController(){
   const STORAGE_KEY="loadmaster-theme";
   const root=document.documentElement;

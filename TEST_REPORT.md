@@ -1,12 +1,11 @@
-# Pruebas v5.37
+# Pruebas v5.38
 
 - `node --check app.js`: OK
 - `node --check optimizer.js`: OK
 - IDs HTML únicos: 170
-- Control `Autoacomodo al agregar`: conectado y persistente
-- Prueba directa de capacidad vertical: OK
-  - base 42×42, cantidad 6, máximo 21
-  - superior 42×34, cantidad 10, máximo 16
-  - resultado: una pila mixta de 16, sin pendientes y sin mover el piso
-- Salvaguarda: si no hay mejora, se conserva el plano normal
-- Se corrigió un error heredado en la comparación de orientaciones (`fitUpperOrientation`)
+- Botón `Buscar apilamiento` disponible antes de optimizar: OK
+- Preparación previa conserva la cantidad total de pallets: OK
+- Caso 42×42 (6) + 42×34 (10), límite menor 16: crea pila mixta válida
+- Flujo posterior de capacidad vertical v5.37: OK
+- Al agregar carga nueva se reinicia el estado de optimización: OK
+- Pruebas específicas de preparación previa y capacidad vertical posterior: OK

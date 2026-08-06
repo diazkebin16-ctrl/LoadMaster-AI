@@ -1,7 +1,6 @@
-# LoadMaster AI v5.37 SMART PRELOAD
+# LoadMaster AI v5.38 PRESTACK ANYTIME
 
-- Autoacomodo suave opcional al agregar pilas nuevas.
-- Las pilas existentes no se mueven y las que no caben pasan a pendientes.
-- Buscar apilamiento revisa primero la capacidad vertical disponible del plano actual.
-- Ejemplo validado: 10 pallets 42×34 sobre una base 42×42 con 6 pallets, límite total 16.
-- Si el apilamiento directo no mejora, se conserva la búsqueda apilar-primero y luego optimizar.
+- `Buscar apilamiento` se puede usar antes de optimizar para preparar pilas mixtas compatibles.
+- Después de optimizar conserva el flujo de capacidad vertical y reconstrucción apilada.
+- La carga nueva reinicia correctamente el estado de optimización para que el botón detecte el modo previo.
+- El botón permanece disponible siempre que exista carga.
