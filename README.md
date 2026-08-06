@@ -1,4 +1,4 @@
-# LoadMaster AI v5.40 PRESTACK COUNT FIX — actualización corregida
+# LoadMaster AI v5.40 NORMAL FIRST — actualización corregida
 
 Esta compilación corrige la actualización en GitHub Pages:
 - todas las referencias muestran v5.40;

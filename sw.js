@@ -1,4 +1,4 @@
-const CACHE="loadmaster-ai-v5.40-prestack-count-fix";
+const CACHE="loadmaster-ai-v5.40-normal-first";
 const ASSETS=[
   "./index.html?v=5.40",
   "./styles.css?v=5.40",
