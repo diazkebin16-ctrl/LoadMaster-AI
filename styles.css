@@ -552,3 +552,6 @@ html[data-theme="dark"] .photoTableWrap,
 html[data-theme="dark"] .photoReviewTable td{
   border-color:var(--line);
 }
+
+/* v5.51: controles de velocidad y progreso */
+.optimizationModeRow{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,auto);gap:.45rem .75rem;align-items:center;margin:.75rem 0 1rem}.optimizationModeRow select{width:100%;border:1px solid var(--border,#334155);border-radius:.75rem;padding:.65rem .8rem;background:var(--panel,#111827);color:inherit}.optimizationModeRow small{grid-column:1/-1;opacity:.75}.optimizationElapsed{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700;opacity:.8}@media(max-width:520px){.optimizationModeRow{grid-template-columns:1fr}}

@@ -851,6 +851,69 @@ class LoadEngine {
     return {stacks:validateLayout(polished,this.trailer).ok?polished:best.placed,unplaced:best.unplaced};
   }
 
+  futurePlacementScore(placed, remaining){
+    // Look-ahead: premia planos que todavía conservan huecos utilizables para
+    // piezas futuras. Evita que el beam conserve solo la opción más llena ahora
+    // si esa opción bloquea todas las piezas pequeñas o cuadradas después.
+    let score=0;
+    for(const s of (remaining||[]).slice(0,10)){
+      const options=this.placementOptions(s,placed,8);
+      if(options.length) score+=Math.min(4,options.length)*3+(Number(s.qty)||1)*0.35;
+      else score-=(Number(s.qty)||1)*2.5;
+    }
+    return score;
+  }
+
+  packPartialLookahead(order,locked,originals,beamWidth=220){
+    let beams=[{placed:Geometry.clone(locked),unplaced:[]}];
+    for(let index=0;index<order.length;index++){
+      if(!this.hasTime())break;
+      const original=order[index],remaining=order.slice(index+1);
+      const next=[];
+      for(const state of beams){
+        if(!this.hasTime())break;
+        const options=this.placementOptions(original,state.placed,32);
+        for(const c of options)next.push({placed:[...state.placed,c],unplaced:[...state.unplaced]});
+        next.push({placed:state.placed,unplaced:[...state.unplaced,Geometry.clone(original)]});
+      }
+      const ranked=next.map(state=>{
+        const rank=this.partialRank(state,originals);
+        const look=this.futurePlacementScore(state.placed,remaining);
+        // La carga total sigue siendo prioridad, pero se conserva diversidad
+        // geométrica cuando dos candidatos están cerca.
+        const value=rank.loadedPallets*1e6+rank.loadedStacks*1e4+rank.loadedArea*2-rank.score+look*600;
+        return {state,rank,value};
+      }).sort((a,b)=>b.value-a.value);
+      const unique=[],seen=new Set(),shapeQuota=new Map();
+      for(const item of ranked){
+        const used=Math.round(Geometry.usedLength(item.state.placed));
+        const pending=item.state.unplaced.length;
+        const bucket=`${used}:${pending}`;
+        const n=shapeQuota.get(bucket)||0;if(n>=Math.max(6,Math.floor(beamWidth/12)))continue;
+        const key=item.state.placed.map(s=>`${s.id}:${s.x},${s.y},${s.w},${s.l}`).sort().join('|');
+        if(seen.has(key))continue;
+        seen.add(key);shapeQuota.set(bucket,n+1);unique.push(item.state);
+        if(unique.length>=beamWidth)break;
+      }
+      beams=unique;
+    }
+    if(!beams.length)return null;
+    beams.sort((a,b)=>{
+      const ar=this.partialRank(a,originals),br=this.partialRank(b,originals);
+      return br.loadedPallets-ar.loadedPallets||br.loadedStacks-ar.loadedStacks||ar.score-br.score;
+    });
+    let best=beams[0];
+    for(const state of beams.slice(0,8)){
+      const rescued=this.compactPendingRescue(state.placed,state.unplaced,originals);
+      if(rescued){
+        const a=this.partialRank({placed:rescued.stacks},originals),b=this.partialRank(best,originals);
+        if(a.loadedPallets>b.loadedPallets||(a.loadedPallets===b.loadedPallets&&a.score<b.score))best={placed:rescued.stacks,unplaced:rescued.unplaced||[]};
+      }
+    }
+    const polished=this.sequenceRefine(best.placed,originals,4);
+    return {stacks:validateLayout(polished,this.trailer).ok?polished:best.placed,unplaced:best.unplaced};
+  }
+
   gravityCompact(input){
     // Compactación tipo gravedad hacia la nariz (y=0). Elimina huecos
     // verticales sin cambiar el orden lateral ni reconstruir el plano.
@@ -1110,8 +1173,12 @@ class LoadEngine {
       for(const order of group.orders){
         if(!this.hasTime())break;
         const key=order.map(s=>s.id).join('|');if(seenFamily.has(key))continue;seenFamily.add(key);
-        const partial=this.packPartial(order,locked,input,Math.max(120,beamWidth*2));
-        if(!partial||!validateLayout(partial.stacks,this.trailer).ok)continue;
+        const standard=this.packPartial(order,locked,input,Math.max(120,beamWidth*2));
+        const lookahead=this.packPartialLookahead(order,locked,input,Math.max(180,beamWidth*3));
+        const choices=[standard,lookahead].filter(x=>x&&validateLayout(x.stacks,this.trailer).ok);
+        if(!choices.length)continue;
+        choices.sort((a,b)=>{const ap=a.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0),bp=b.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0);return bp-ap||b.stacks.length-a.stacks.length||layoutScore(a.stacks,this.trailer,input)-layoutScore(b.stacks,this.trailer,input)});
+        const partial=choices[0];
         const ids=new Set(partial.stacks.map(s=>s.id));
         const candidate={name:group.name,family:group.family,stacks:partial.stacks,unplaced:input.filter(s=>!ids.has(s.id))};
         const pallets=candidate.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0);
@@ -1129,6 +1196,10 @@ class LoadEngine {
       const partial=this.packPartial(order,locked,input,Math.max(90,beamWidth));
       if(partial&&partial.stacks.length>=locked.length){
         solutions.push({name:partial.unplaced.length?'Máxima carga parcial':'Optimización global',...partial});
+      }
+      if(this.hasTime()){
+        const lookahead=this.packPartialLookahead(order,locked,input,Math.max(160,beamWidth*2));
+        if(lookahead&&validateLayout(lookahead.stacks,this.trailer).ok)solutions.push({name:(lookahead.unplaced||[]).length?'Backtracking con reserva de huecos':'Backtracking · carga completa',family:'Backtracking',...lookahead});
       }
     }
 
@@ -1301,6 +1372,48 @@ function runPortfolioSearch(input,trailer,{totalTimeMs=21000,patterns=[],strateg
   const ranked=rankSolutionsIntelligently(valid,trailer);
   return {ok:ranked.length>0,solutions:selectDiverseSolutions(ranked,3,trailer),attemptedProfiles:profiles.length,attemptedRuns:attempt+1,elapsedMs:Date.now()-started};
 }
+
+
+// Fachada pública del optimizador. v5.55 corrige el error de integración
+// "Optimizer is not defined" y garantiza una búsqueda desde una copia limpia.
+const Optimizer = Object.freeze({
+  async optimizeDeep(input, trailer, options = {}) {
+    const cleanInput = Geometry.clone(Array.isArray(input) ? input : []).map(s => ({
+      ...s, x: 0, y: 0, locked: false, blocked: false
+    }));
+    if (!cleanInput.length) return { ok: false, solutions: [], message: 'No hay pilas para optimizar.' };
+
+    const totalMs = Math.max(500, Number(options.totalMs) || 7000);
+    const quickMs = Math.max(150, Math.min(totalMs, Number(options.quickMs) || 1200));
+    const patterns = Array.isArray(options.patterns) ? options.patterns : [];
+    const strategies = Array.isArray(options.strategies) ? options.strategies : [];
+    const seed = Number(options.seed) || Date.now();
+
+    const quickEngine = new LoadEngine(trailer, {
+      timeLimitMs: quickMs, patterns, strategies,
+      seedOffset: seed % 1000003, profile: 'restart'
+    });
+    const quickReport = quickEngine.optimize(Geometry.clone(cleanInput));
+    const baselineSolutions = quickReport?.ok ? (quickReport.solutions || []) : [];
+    if (baselineSolutions.some(s => !(s.unplaced || []).length)) {
+      const ranked = rankSolutionsIntelligently(baselineSolutions, trailer);
+      return { ok: true, solutions: selectDiverseSolutions(ranked, 3, trailer), attemptedProfiles: 1, elapsedMs: quickMs };
+    }
+
+    const portfolio = runPortfolioSearch(Geometry.clone(cleanInput), trailer, {
+      totalTimeMs: Math.max(250, totalMs - quickMs),
+      patterns, strategies, baselineSolutions
+    });
+    if (portfolio.ok) return portfolio;
+    if (quickReport?.ok) return quickReport;
+    return {
+      ok: false, solutions: [],
+      attemptedProfiles: portfolio.attemptedProfiles || 0,
+      elapsedMs: portfolio.elapsedMs || totalMs,
+      message: quickReport?.message || 'No se encontró una solución válida.'
+    };
+  }
+});
 
 // ===== app.js =====
 
@@ -1679,7 +1792,7 @@ function normalizeLibraryItem(raw={}){
     return opts.filter(o=>o.w<=base.w+EPS&&o.l<=base.l+EPS).sort((a,b)=>(base.w*base.l-a.w*a.l)-(base.w*base.l-b.w*b.l))[0]||null;
   }
   function buildStackingFirstLoad(placedInput,pendingInput,library=[],profile='balanced'){
-    // v5.41: forma primero las pilas normales y solo después combina sobrantes.
+    // v5.55: forma primero las pilas normales y solo después combina sobrantes.
     // Esto evita crear mezclas arbitrarias y descubre casos como 5 de 145×26
     // abajo + 5 de 120×24 arriba, reduciendo una posición de piso.
     const groups=originalStackGroups(placedInput,pendingInput,library);
@@ -1890,7 +2003,7 @@ function normalizeLibraryItem(raw={}){
     constructor(){
       this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[]; this.lastStackingResult=null; this.hasOptimized=false;
       this.bind(); this.syncTrailerInputs(); this.restoreAccordionState(); this.render();
-      if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js?v=5.41", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+      if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js?v=5.55", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
     }
     get state(){return this.store.state;}
     toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2100);}
@@ -1921,12 +2034,13 @@ function normalizeLibraryItem(raw={}){
       $("deleteBtn").onclick=()=>this.deleteSelected(); $("floatDeleteBtn").onclick=()=>this.deleteSelected();
       $("undoBtn").onclick=()=>this.undo(); $("redoBtn").onclick=()=>this.redo();
       $("compactBtn").onclick=()=>this.compact(); $("stackAssistBtn").onclick=()=>this.searchMixedStacking(); $("optimizeBtn").onclick=()=>this.optimize(); $("retryOptimizeBtn").onclick=()=>this.optimize();
+      $("optimizationMode").onchange=e=>{const help={fast:"Prioriza velocidad y detiene pronto los intentos sin mejora.",balanced:"Equilibrio entre velocidad y calidad.",deep:"Explora más variantes; puede tardar hasta 7 minutos."};$("optimizationModeHelp").textContent=help[e.target.value]||help.balanced;};
       $("clearBtn").onclick=()=>{if(!this.state.stacks.length)return;this.store.remember();this.state.stacks=[];this.state.selectedId=null;this.render();};
       $("demoBtn").onclick=()=>this.demo();
       $("saveLoadBtn").onclick=()=>this.saveFile(); $("openLoadBtn").onclick=()=>$("fileInput").click();
       $("saveImageBtn").onclick=()=>this.saveImage(); $("saveReportBtn").onclick=()=>this.saveProfessionalPdf(); $("shareReportBtn").onclick=()=>this.shareProfessionalReport();
       $("fileInput").onchange=e=>this.openFile(e); $("printBtn").onclick=()=>window.print();
-      $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;$("stopProgressiveBtn").onclick=()=>this.stopProgressiveOptimization();$("applyProgressiveBtn").onclick=()=>this.applyProgressiveImprovement();$("ignoreProgressiveBtn").onclick=()=>this.ignoreProgressiveImprovement();$("compareProgressiveBtn").onclick=()=>this.compareProgressiveImprovement();$("retryPendingBtn").onclick=()=>this.retryPending();$("clearPendingBtn").onclick=()=>this.clearPending();
+      $("closeOptimizer").onclick=()=>$("optimizerPanel").hidden=true;$("stopProgressiveBtn").onclick=()=>this.stopActiveOptimization();$("applyProgressiveBtn").onclick=()=>this.applyProgressiveImprovement();$("ignoreProgressiveBtn").onclick=()=>this.ignoreProgressiveImprovement();$("compareProgressiveBtn").onclick=()=>this.compareProgressiveImprovement();$("retryPendingBtn").onclick=()=>this.retryPending();$("clearPendingBtn").onclick=()=>this.clearPending();
       $("scanCameraBtn").onclick=()=>this.openPhotoPicker("camera"); $("scanGalleryBtn").onclick=()=>this.openPhotoPicker("gallery");
       $("scanCameraInput").onchange=e=>this.loadPhotoForReading(e); $("scanGalleryInput").onchange=e=>this.loadPhotoForReading(e);
       $("closePhotoReader").onclick=()=>$("photoReaderDialog").close(); $("cancelPhotoImportBtn").onclick=()=>$("photoReaderDialog").close();
@@ -2105,7 +2219,7 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.41",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.55",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
@@ -2291,7 +2405,7 @@ function normalizeLibraryItem(raw={}){
       const saved=this.filterAndSortHistory(this.visualHistory.saved,false),recent=this.filterAndSortHistory(this.visualHistory.recent,true);$('savedHistoryCount').textContent=`(${saved.length})`;$('recentHistoryCount').textContent=`(${recent.length})`;renderList($('savedHistoryList'),this.visualHistory.saved,false);renderList($('recentHistoryList'),this.visualHistory.recent,true);this.updateHistorySelectionToolbar();this.updateHistorySummary();
     }
     createHistoryReportCanvas(entry){
-      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.41',620,1730);return canvas;
+      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=920,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.55',620,1730);return canvas;
     }
     exportHistoryEntriesPdf(entries){try{const valid=(entries||[]).slice(0,10);if(!valid.length)return this.toast('Selecciona al menos una carga');const blob=canvasesToPdfBlob(valid.map(e=>this.createHistoryReportCanvas(e))),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-reportes-${new Date().toISOString().slice(0,10)}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);this.toast(`${valid.length} reporte${valid.length===1?'':'s'} exportado${valid.length===1?'':'s'} en PDF`);}catch(error){this.toast(error.message||'No se pudieron crear los reportes');}}
     exportSelectedHistoryPdf(){this.exportHistoryEntriesPdf(this.getSelectedHistoryEntries());}
@@ -2369,43 +2483,575 @@ function normalizeLibraryItem(raw={}){
         this.scheduleProgressiveRound(session);
       },80);
     }
-    optimize(){
+    stopActiveOptimization(){
+      this.currentOptimizationSessionId=null;
+      if(this.progressiveSession)this.stopProgressiveOptimization(true);
+      this.updateProgressiveStatus("Búsqueda detenida por el usuario. Se conservará la mejor solución válida encontrada.",false);
+      const btn=$("stopProgressiveBtn");if(btn)btn.hidden=true;
+    }
+    async optimize(){
       if(this.progressiveSession)this.stopProgressiveOptimization(true);
       this.hideProgressiveOffer();
-      const optimizationStarted=performance.now();this.currentOptimizationSessionId=uid();
+      const optimizationStarted=performance.now(),sessionId=uid();this.currentOptimizationSessionId=sessionId;
+      const mode=$("optimizationMode")?.value||"balanced";
+      const modeConfig={
+        fast:{label:"Rápido",globalMs:60000,deepMs:1200,directMs:650,maxVariants:2,maxProfiles:1,refinePasses:1,maxStagnant:2,beamWidth:6,lastMileMs:6500,exactClosureMs:3500,ruinMs:4200},
+        balanced:{label:"Balanceado",globalMs:180000,deepMs:2800,directMs:1400,maxVariants:4,maxProfiles:2,refinePasses:2,maxStagnant:4,beamWidth:12,lastMileMs:22000,exactClosureMs:18000,ruinMs:18000},
+        deep:{label:"Profundo",globalMs:420000,deepMs:6200,directMs:2800,maxVariants:99,maxProfiles:99,refinePasses:3,maxStagnant:8,beamWidth:20,lastMileMs:65000,exactClosureMs:52000,ruinMs:50000}
+      }[mode];
+      const isActive=()=>this.currentOptimizationSessionId===sessionId;
+      const elapsedEl=$("optimizationElapsed");
+      const updateElapsed=()=>{if(elapsedEl)elapsedEl.textContent=`${Math.round((performance.now()-optimizationStarted)/1000)} s · ${modeConfig.label}`;};
+      const elapsedTimer=setInterval(updateElapsed,500);updateElapsed();
       const allInput=[...this.state.stacks,...(this.state.pending||[])];
       if(!allInput.length)return this.toast("No hay pilas");
-      $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Buscando una primera solución rápida…";$("optimizerResults").innerHTML="";this.updateProgressiveStatus("Preparando optimización progresiva…",true);
+      $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Preparando tres búsquedas realmente independientes…";$("optimizerResults").innerHTML="";this.updateProgressiveStatus("Cada estrategia conservará su mejor solución propia.",true);
       const rawOriginal=clone(allInput),beforeUsed=Geometry.usedLength(this.state.stacks),baselineStats={loaded:this.state.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0),left:(this.state.pending||[]).reduce((n,s)=>n+(Number(s.qty)||1),0),used:beforeUsed};
-      const stackedFirst=buildStackingFirstLoad(rawOriginal,[],this.state.library,"balanced");
-      const original=stackedFirst.length<rawOriginal.length?stackedFirst:rawOriginal;
-      const autoMixed=original.filter(s=>Array.isArray(s.layers)&&s.layers.length>1).length;
-      if(autoMixed){this.lastStackingResult={mode:"automatic-before-optimize",beforeCount:rawOriginal.length,afterCount:original.length,mixedCount:autoMixed};$("optimizerSummary").textContent=`Apilamiento automático: ${rawOriginal.length} → ${original.length} pilas. Buscando acomodo…`;}
-      this.strategyMemory.prepare(original,this.state.trailer);
-      setTimeout(()=>{
-        const fast=new LoadEngine(this.state.trailer,{timeLimitMs:3200,patterns:this.patternMemory.patterns,strategies:this.strategyMemory.items});const report=fast.optimize(original);
-        if(!report.ok||!report.solutions?.length){this.updateProgressiveStatus("No se encontró una solución válida.",false);$("optimizerSummary").textContent=report.message||"No se encontró una solución válida";this.toast(report.message||"No se pudo optimizar");return;}
-        const best=report.solutions[0],validation=validateLayout(best.stacks,this.state.trailer);if(!validation.ok){this.updateProgressiveStatus("La solución rápida no pasó la validación.",false);return this.toast("La solución rápida no fue válida");}
-        this.lastOptimizationMs=performance.now()-optimizationStarted;this.lastWinningStrategy=(autoMixed?"Apilado automático + ":"")+(best.family||"Solución rápida");this.lastSolutions=report.solutions;this.lastUnplaced=clone(best.unplaced||[]);this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.hasOptimized=true;this.render();this.renderSolutions(report.solutions,beforeUsed);
-        const leftText=best.unplacedStacks?` · ${best.unplacedStacks} pila${best.unplacedStacks===1?'':'s'} pendientes (${best.unplacedPallets} pallets)`:' · Toda la carga quedó dentro';
-        $("optimizerSummary").textContent=`Primera solución: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets · ${(best.efficiency||0).toFixed(1)}% eficiencia${leftText}`;
-        if(!best.unplacedStacks){this.updateProgressiveStatus("Solución completa encontrada en la fase rápida.",false);$("stopProgressiveBtn").hidden=true;this.strategyMemory.recordOutcome(original,this.state.trailer,best,"optimización adaptativa",baselineStats);this.patternMemory.learnComplete(best.stacks,this.state.trailer);this.recordRecentOptimization();this.toast("Toda la carga quedó acomodada");return;}
-        const session={id:uid(),started:optimizationStarted,original,baselineStats,best:clone(best),bestSolutions:report.solutions,round:0,cancelled:false};this.progressiveSession=session;
-        this.updateProgressiveStatus(`Primera solución disponible · IA seguirá buscando hasta 30 s. Mejor actual: ${best.loadedStacks} pilas / ${best.loadedPallets} pallets`,true);
-        this.toast("Primera solución lista; la IA continúa buscando mejoras");
-        this.scheduleProgressiveRound(session);
-      },40);
+      // v5.55: el plano visible nunca se destruye durante la búsqueda. Cada
+      // estrategia trabaja sobre copias virtuales y solo publica candidatos válidos.
+      const visualBackup={stacks:clone(this.state.stacks||[]),pending:clone(this.state.pending||[]),selectedId:this.state.selectedId};
+      const totalPallets=rawOriginal.reduce((n,s)=>n+(Number(s.qty)||1),0);
+      const freshInput=input=>(input||[]).map(raw=>({...clone(raw),x:raw?._strategyAnchor?(Number(raw.x)||0):0,y:raw?._strategyAnchor?(Number(raw.y)||0):0,locked:!!raw?._strategyAnchor,blocked:false,rotated:!!raw?.rotated}));
+      const area=s=>(Number(s.w)||0)*(Number(s.l)||0),aspect=s=>Math.max(Number(s.w)||1,Number(s.l)||1)/Math.max(1,Math.min(Number(s.w)||1,Number(s.l)||1));
+      const ordered=(input,mode)=>{
+        const a=freshInput(input);
+        const cmp={
+          long:(x,y)=>Math.max(y.w,y.l)-Math.max(x.w,x.l)||area(y)-area(x),
+          square:(x,y)=>Math.abs(aspect(x)-1)-Math.abs(aspect(y)-1)||area(y)-area(x),
+          filler:(x,y)=>area(x)-area(y)||Math.max(x.w,x.l)-Math.max(y.w,y.l),
+          wide:(x,y)=>Math.min(Math.abs(this.state.trailer.width-x.w),Math.abs(this.state.trailer.width-x.l))-Math.min(Math.abs(this.state.trailer.width-y.w),Math.abs(this.state.trailer.width-y.l))||area(y)-area(x),
+          base:(x,y)=>Math.min(y.w,y.l)-Math.min(x.w,x.l)||area(y)-area(x)
+        }[mode]||((x,y)=>area(y)-area(x));
+        return a.sort(cmp);
+      };
+      const zigzag=input=>{const a=ordered(input,"long"),out=[];let i=0,j=a.length-1;while(i<=j){out.push(a[i++]);if(i<=j)out.push(a[j--]);}return out;};
+      const anchoredVariant=(input,mode)=>{
+        const list=ordered(input,mode==="doors"?"square":"long"),placed=[],rest=[];
+        let cursor=0;
+        for(const raw of list){
+          const item={...clone(raw),_strategyAnchor:false,locked:false,x:0,y:0};
+          if(placed.length<4){
+            const w=Number(item.w)||0,l=Number(item.l)||0;
+            const y=mode==="doors"?Math.max(0,this.state.trailer.length-l):0;
+            const x=cursor;
+            if(w>0&&l>0&&x+w<=this.state.trailer.width){item.x=x;item.y=y;item.locked=true;item._strategyAnchor=true;placed.push(item);cursor+=w;continue;}
+          }
+          rest.push(item);
+        }
+        return [...placed,...rest];
+      };
+      const seededShuffle=(input,seed)=>{
+        const out=freshInput(input);let x=seed>>>0;
+        const rnd=()=>{x=(x*1664525+1013904223)>>>0;return x/4294967296};
+        for(let i=out.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[out[i],out[j]]=[out[j],out[i]];}return out;
+      };
+      const signature=input=>input.map(s=>`${Math.round(s.w*100)/100}x${Math.round(s.l*100)/100}:${s.qty}:${Array.isArray(s.layers)?s.layers.map(x=>`${x.w}x${x.l}:${x.qty}`).join('+'):''}`).join('|');
+      const strategies=[
+        {id:1,label:"Apilado automático",variants:[],profiles:["tight","balanced","base-heavy"]},
+        {id:2,label:"Sin apilar",variants:[],profiles:["rows","restart","balanced"]},
+        {id:3,label:"Absorción y relleno",variants:[],profiles:["base-heavy","restart","tight"]}
+      ];
+      const addVariant=(strategy,name,input)=>{
+        if(!Array.isArray(input)||!input.length)return;
+        const clean=freshInput(input),key=signature(clean);
+        strategy._seen=strategy._seen||new Set();if(strategy._seen.has(key))return;strategy._seen.add(key);
+        strategy.variants.push({name,input:clean,mixedCount:clean.filter(s=>Array.isArray(s.layers)&&s.layers.length>1).length});
+      };
+      // E1: cambia tanto el apilado como el orden de entrada.
+      for(const profile of ["balanced","tight","large-base","base-heavy"]){
+        const built=buildStackingFirstLoad(rawOriginal,[],this.state.library,profile);
+        addVariant(strategies[0],`${profile} · largos primero`,ordered(built,"long"));
+        addVariant(strategies[0],`${profile} · bases primero`,ordered(built,"base"));
+      }
+      // E2: jamás mezcla verticalmente y explora órdenes geométricos opuestos.
+      addVariant(strategies[1],"largos primero",ordered(rawOriginal,"long"));
+      addVariant(strategies[1],"cuadrados primero",ordered(rawOriginal,"square"));
+      addVariant(strategies[1],"relleno pequeño primero",ordered(rawOriginal,"filler"));
+      addVariant(strategies[1],"alternado grande-pequeño",zigzag(rawOriginal));
+      addVariant(strategies[1],"fila inicial bloqueada",anchoredVariant(rawOriginal,"nose"));
+      addVariant(strategies[1],"orden exploratorio A",seededShuffle(rawOriginal,24681357));
+      // E3: absorbe verticalmente y luego reserva piezas de relleno con órdenes propios.
+      const merged=prestackMergePlan(rawOriginal,[],this.state.library,this.state.trailer);
+      const absorbed=merged.ok?[...merged.stacks,...merged.pending]:buildStackingFirstLoad(rawOriginal,[],this.state.library,"base-heavy");
+      addVariant(strategies[2],"absorción · cuadrados primero",ordered(absorbed,"square"));
+      addVariant(strategies[2],"absorción · relleno primero",ordered(absorbed,"filler"));
+      addVariant(strategies[2],"absorción · ajuste al ancho",ordered(absorbed,"wide"));
+      addVariant(strategies[2],"absorción · alternado",zigzag(absorbed));
+      addVariant(strategies[2],"bloque de cuadrados en puertas",anchoredVariant(absorbed,"doors"));
+      addVariant(strategies[2],"orden exploratorio B",seededShuffle(absorbed,975318642));
+
+      const holePenalty=stacks=>{
+        const items=stacks||[];if(!items.length)return Infinity;
+        const used=Math.max(1,Geometry.usedLength(items)),step=12;let waste=0,dead=0;
+        for(let y=0;y<used;y+=step){
+          const intervals=items.filter(s=>(Number(s.y)||0)<y+step&&(Number(s.y)||0)+(Number(s.l)||0)>y).map(s=>[Number(s.x)||0,(Number(s.x)||0)+(Number(s.w)||0)]).sort((a,b)=>a[0]-b[0]);
+          let cursor=0;for(const [a,b] of intervals){if(a>cursor){const gap=a-cursor;waste+=gap;dead+=gap<24?gap*1.8:gap*.4}cursor=Math.max(cursor,b)}if(cursor<this.state.trailer.width){const gap=this.state.trailer.width-cursor;waste+=gap;dead+=gap<24?gap*1.8:gap*.4}
+        }
+        return Math.round((waste+dead)*10)/10;
+      };
+      const compare=(a,b)=>(b.loadedPallets||0)-(a.loadedPallets||0)||(a.unplacedStacks||0)-(b.unplacedStacks||0)||(a.unplacedPallets||0)-(b.unplacedPallets||0)||(a.holePenalty||Infinity)-(b.holePenalty||Infinity)||(a.usedLength||Infinity)-(b.usedLength||Infinity)||(b.efficiency||0)-(a.efficiency||0);
+      const strategyResults=new Map();
+      const accept=(bucket,sol,strategy,variantName,mixedCount=0)=>{
+        if(!sol||!Array.isArray(sol.stacks)||!validateLayout(sol.stacks,this.state.trailer).ok)return null;
+        const loadedPallets=sol.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0),unplaced=clone(sol.unplaced||[]),unplacedPallets=unplaced.reduce((n,s)=>n+(Number(s.qty)||1),0);
+        const normalized={...sol,strategyId:strategy.id,strategyLabel:strategy.label,variantName,family:`Estrategia ${strategy.id} · ${strategy.label}`,mixedCount,loadedPallets,unplacedPallets,unplacedStacks:unplaced.length,loadedStacks:sol.stacks.length,usedLength:Geometry.usedLength(sol.stacks),holePenalty:holePenalty(sol.stacks)};
+        Object.assign(normalized,intelligentSolutionRank(normalized,this.state.trailer,bucket[0]||null));
+        bucket.push(normalized);return normalized;
+      };
+      const previewStrategy=(strategy,sol,message)=>{
+        if(!sol||!Array.isArray(sol.stacks)||!sol.stacks.length)return;
+        this.state.stacks=clone(sol.stacks||[]);this.state.pending=clone(sol.unplaced||[]);this.state.selectedId=null;this.render();
+        $("optimizerSummary").textContent=message||`Estrategia ${strategy.id}: mejor parcial · ${sol.loadedStacks} pilas dentro · ${sol.unplacedStacks} pendientes`;
+      };
+      // Red de seguridad independiente del motor profundo. Siempre construye una
+      // distribución parcial válida y evita terminar con las 32 pilas pendientes.
+      const buildSafePartial=(input,profile="balanced")=>{
+        const source=freshInput(input),placed=[],unplaced=[];
+        const chooseOrientations=raw=>{
+          const normal={...clone(raw),x:0,y:0,locked:false,blocked:false};
+          const options=[normal];
+          const fourWay=String(raw.type||"").toLowerCase().replace(/[^a-z0-9]/g,"")==="4way";
+          if(fourWay&&raw.canRotate!==false&&Math.abs((Number(raw.w)||0)-(Number(raw.l)||0))>EPS)options.push({...normal,w:Number(raw.l),l:Number(raw.w),rotated:!raw.rotated});
+          return options;
+        };
+        for(const raw of source){
+          let best=null;
+          for(const pose of chooseOrientations(raw)){
+            const candidate=findFirstValidPlacement(pose,placed,this.state.trailer);
+            if(!candidate)continue;
+            const edgeWaste=Math.max(0,this.state.trailer.width-(candidate.x+candidate.w));
+            const value=(profile==="rows"?candidate.y*100+candidate.x:profile==="base-heavy"?candidate.y*100+edgeWaste:candidate.y*100+candidate.x+edgeWaste*.2);
+            if(!best||value<best.value)best={candidate,value};
+          }
+          if(best)placed.push(best.candidate);else unplaced.push(clone(raw));
+        }
+        const compacted=new LoadEngine(this.state.trailer).compact(clone(placed));
+        const stacks=compacted?.ok?compacted.stacks:placed;
+        if(!stacks.length||!validateLayout(stacks,this.state.trailer).ok)return null;
+        const ids=new Set(stacks.map(x=>x.id)),pending=[...unplaced,...source.filter(x=>!ids.has(x.id)&&!unplaced.some(u=>u.id===x.id))];
+        return {name:"Reconstrucción segura",family:"Fallback geométrico",stacks,unplaced:pending,efficiency:calculateLoadStatistics(stacks,this.state.trailer).efficiency};
+      };
+      // v5.55: fase posterior a la primera solución válida. No se conforma con
+      // el primer plano aceptable: compacta, prueba giros, intercambios 1↔N y
+      // pequeñas reconstrucciones locales antes de declarar una estrategia terminada.
+      const orientationOptions=raw=>{
+        const normal={...clone(raw),x:0,y:0,locked:false,blocked:false};
+        const out=[normal],fourWay=String(raw.type||"").toLowerCase().replace(/[^a-z0-9]/g,"")=="4way";
+        if(fourWay&&raw.canRotate!==false&&Math.abs((Number(raw.w)||0)-(Number(raw.l)||0))>EPS)out.push({...normal,w:Number(raw.l),l:Number(raw.w),rotated:!raw.rotated});
+        return out;
+      };
+      const insertBestPose=(raw,placed)=>{
+        let best=null;
+        for(const pose of orientationOptions(raw)){
+          const candidate=findFirstValidPlacement(pose,placed,this.state.trailer);
+          if(!candidate)continue;
+          const value=(candidate.y+candidate.l)*1000+candidate.x+Math.max(0,this.state.trailer.width-(candidate.x+candidate.w))*.15;
+          if(!best||value<best.value)best={candidate,value};
+        }
+        return best?.candidate||null;
+      };
+      const greedyReinsert=(base,pending,order="area-desc")=>{
+        const placed=clone(base||[]),left=[];
+        const list=clone(pending||[]).sort(order==="area-asc"?(a,b)=>area(a)-area(b):order==="square"?(a,b)=>Math.abs(aspect(a)-1)-Math.abs(aspect(b)-1)||area(b)-area(a):(a,b)=>area(b)-area(a));
+        for(const raw of list){const candidate=insertBestPose(raw,placed);if(candidate)placed.push(candidate);else left.push(clone(raw));}
+        const compacted=new LoadEngine(this.state.trailer).compact(clone(placed));
+        return {stacks:compacted?.ok?compacted.stacks:placed,unplaced:left};
+      };
+      const tryExchangeRescue=(best,strategy,local,variantName,pass)=>{
+        if(!(best.unplaced||[]).length)return null;
+        const placed=clone(best.stacks||[]),pending=clone(best.unplaced||[]);
+        // Prioriza pendientes con más pallets y mayor área; busca liberar una zona
+        // retirando una o dos pilas de piso y luego reinsertando todo el conjunto.
+        const targets=[...pending].sort((a,b)=>(Number(b.qty)||1)-(Number(a.qty)||1)||area(b)-area(a)).slice(0,4);
+        const removable=[...placed].sort((a,b)=>area(a)-area(b)||(Number(a.qty)||1)-(Number(b.qty)||1)).slice(0,10);
+        let bestSwap=null;
+        for(const target of targets){
+          const groups=removable.map(x=>[x]);
+          for(let i=0;i<Math.min(7,removable.length);i++)for(let j=i+1;j<Math.min(8,removable.length);j++)groups.push([removable[i],removable[j]]);
+          for(const removed of groups){
+            const ids=new Set(removed.map(x=>x.id)),base=placed.filter(x=>!ids.has(x.id));
+            const first=insertBestPose(target,base);if(!first)continue;
+            const restPending=pending.filter(x=>x.id!==target.id);
+            const rebuilt=greedyReinsert([...base,first],[...removed,...restPending],"area-desc");
+            const sol={stacks:rebuilt.stacks,unplaced:rebuilt.unplaced,efficiency:calculateLoadStatistics(rebuilt.stacks,this.state.trailer).efficiency};
+            const norm=accept(local,sol,strategy,`${variantName} · intercambio local ${pass}`,best.mixedCount||0);
+            if(norm&&(!bestSwap||compare(norm,bestSwap)<0))bestSwap=norm;
+          }
+        }
+        return bestSwap;
+      };
+      const beamReinsert=(base,pool,width=12,seed=1)=>{
+        let rndState=seed>>>0;const rnd=()=>{rndState=(rndState*1664525+1013904223)>>>0;return rndState/4294967296};
+        const orderedPool=clone(pool||[]).sort((a,b)=>(Number(b.qty)||1)-(Number(a.qty)||1)||area(b)-area(a));
+        let beam=[{placed:clone(base||[]),left:[]}];
+        for(const raw of orderedPool){
+          const next=[];
+          for(const state of beam){
+            const poses=[];
+            for(const pose of orientationOptions(raw)){
+              const first=findFirstValidPlacement(pose,state.placed,this.state.trailer);if(first)poses.push(first);
+              const shuffled=clone(state.placed).sort(()=>rnd()-.5);const alt=findFirstValidPlacement(pose,shuffled,this.state.trailer);if(alt)poses.push(alt);
+            }
+            const unique=[];const keys=new Set();for(const c of poses){const k=`${Math.round(c.x)}:${Math.round(c.y)}:${c.w}:${c.l}`;if(!keys.has(k)){keys.add(k);unique.push(c)}}
+            for(const c of unique.slice(0,4))next.push({placed:[...clone(state.placed),c],left:clone(state.left)});
+            next.push({placed:clone(state.placed),left:[...clone(state.left),clone(raw)]});
+          }
+          const rank=x=>x.left.reduce((n,s)=>n+(Number(s.qty)||1),0)*1e8+x.left.length*1e6+holePenalty(x.placed)*100+Geometry.usedLength(x.placed);
+          next.sort((a,b)=>rank(a)-rank(b));beam=next.slice(0,width);
+        }
+        let bestState=beam[0]||{placed:clone(base||[]),left:clone(pool||[])};
+        const compacted=new LoadEngine(this.state.trailer).compact(clone(bestState.placed));
+        if(compacted?.ok)bestState.placed=compacted.stacks;
+        return {stacks:bestState.placed,unplaced:bestState.left};
+      };
+      const tryWideNeighborhoodRebuild=(best,strategy,local,variantName,pass)=>{
+        if(!(best.unplaced||[]).length)return null;
+        const placed=clone(best.stacks||[]),used=Geometry.usedLength(placed),cut=Math.max(0,used*.68);
+        const zone=placed.filter(s=>(Number(s.y)||0)+(Number(s.l)||0)>=cut).sort((a,b)=>(Number(b.y)||0)-(Number(a.y)||0)).slice(0,14);
+        if(!zone.length)return null;
+        const ids=new Set(zone.map(x=>x.id)),base=placed.filter(x=>!ids.has(x.id)),pool=[...zone,...clone(best.unplaced||[])];let winner=null;
+        for(let i=0;i<Math.max(3,modeConfig.refinePasses+2);i++){
+          const rebuilt=beamReinsert(base,seededShuffle(pool,530000+strategy.id*1000+pass*71+i*997),modeConfig.beamWidth,9001+i*31+pass);
+          const sol={stacks:rebuilt.stacks,unplaced:rebuilt.unplaced,efficiency:calculateLoadStatistics(rebuilt.stacks,this.state.trailer).efficiency};
+          const norm=accept(local,sol,strategy,`${variantName} · reconstrucción amplia beam ${pass}.${i+1}`,best.mixedCount||0);
+          if(norm&&(!winner||compare(norm,winner)<0))winner=norm;
+        }
+        return winner;
+      };
+      const tryMetaheuristicRescue=(best,strategy,local,variantName,pass,budgetMs)=>{
+        if(!(best.unplaced||[]).length)return null;
+        const started=performance.now(),tabu=new Set();let current=best,winner=best,temp=1;
+        let seed=(strategy.id*1000003+pass*7919)>>>0;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296};
+        while(performance.now()-started<budgetMs){
+          const placed=clone(current.stacks||[]),removeCount=2+Math.floor(rnd()*Math.min(4,Math.max(1,placed.length-1)));
+          const chosen=[...placed].sort(()=>rnd()-.5).slice(0,removeCount),key=chosen.map(x=>x.id).sort().join('|');if(tabu.has(key))continue;tabu.add(key);if(tabu.size>80)tabu.delete(tabu.values().next().value);
+          const ids=new Set(chosen.map(x=>x.id)),base=placed.filter(x=>!ids.has(x.id)),pool=[...chosen,...clone(current.unplaced||[])];
+          const rebuilt=beamReinsert(base,seededShuffle(pool,seed),Math.max(5,Math.floor(modeConfig.beamWidth*.65)),seed);
+          const sol={stacks:rebuilt.stacks,unplaced:rebuilt.unplaced,efficiency:calculateLoadStatistics(rebuilt.stacks,this.state.trailer).efficiency};
+          const norm=accept(local,sol,strategy,`${variantName} · tabu/annealing ${pass}`,best.mixedCount||0);if(!norm)continue;
+          const delta=compare(norm,current);if(delta<0||Math.exp(-Math.max(1,delta)/(1000*Math.max(.08,temp)))>rnd())current=norm;
+          if(compare(norm,winner)<0)winner=norm;temp*=.985;
+          if(winner.unplacedStacks===0)break;
+        }
+        return compare(winner,best)<0?winner:null;
+      };
+      // v5.55: Large Neighborhood Search (ruin-and-recreate). Cuando quedan
+      // pocas pilas, deja de proteger el plano actual: destruye deliberadamente
+      // vecindarios de 15–60 % de las pilas móviles, mezcla esas pilas con las
+      // pendientes y reconstruye desde cero. Puede aceptar temporalmente un estado
+      // peor, pero solo publica el mejor estado válido encontrado.
+      const tryRuinRecreateSacrifice=(best,strategy,local,variantName,pass,budgetMs)=>{
+        if(!(best.unplaced||[]).length||best.unplaced.length>5)return null;
+        const started=performance.now(),originalBest=best;
+        let current=best,winner=best,temp=1.0,iteration=0;
+        let seed=(0x9e3779b9^strategy.id*1000003^pass*9176)>>>0;
+        const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296};
+        const objective=sol=>{
+          const leftP=(sol.unplaced||[]).reduce((n,x)=>n+(Number(x.qty)||1),0);
+          const leftS=(sol.unplaced||[]).length;
+          return leftP*1e9+leftS*1e7+(sol.holePenalty||holePenalty(sol.stacks||[]))*1000+(sol.usedLength||Geometry.usedLength(sol.stacks||[]));
+        };
+        while(performance.now()-started<budgetMs&&current.unplacedStacks>0){
+          iteration++;
+          const placed=clone(current.stacks||[]),pending=clone(current.unplaced||[]),movable=placed.filter(x=>!x.locked);
+          if(movable.length<3)break;
+          const fractions=[.15,.22,.30,.38,.48,.60];
+          const fraction=fractions[iteration%fractions.length];
+          const count=Math.max(3,Math.min(movable.length,Math.ceil(movable.length*fraction)));
+          const sameShape=x=>pending.some(p=>Math.abs((Number(x.w)||0)-(Number(p.w)||0))<EPS&&Math.abs((Number(x.l)||0)-(Number(p.l)||0))<EPS||Math.abs((Number(x.w)||0)-(Number(p.l)||0))<EPS&&Math.abs((Number(x.l)||0)-(Number(p.w)||0))<EPS);
+          const similarity=x=>Math.min(...pending.map(p=>Math.abs(area(x)-area(p))+Math.abs(Math.max(x.w,x.l)-Math.max(p.w,p.l))*12));
+          let candidates;
+          switch(iteration%6){
+            case 0: candidates=[...movable].sort((a,b)=>(Number(a.qty)||1)-(Number(b.qty)||1)||similarity(a)-similarity(b));break; // sacrifica pilas baratas
+            case 1: candidates=[...movable].sort((a,b)=>(sameShape(b)?1:0)-(sameShape(a)?1:0)||similarity(a)-similarity(b));break; // rompe familias de la pendiente
+            case 2: candidates=[...movable].sort((a,b)=>(b.y+b.l)-(a.y+a.l));break; // puertas
+            case 3: candidates=[...movable].sort((a,b)=>(a.y+a.l)-(b.y+b.l));break; // nariz
+            case 4: {const mid=Geometry.usedLength(placed)/2;candidates=[...movable].sort((a,b)=>Math.abs((a.y+a.l/2)-mid)-Math.abs((b.y+b.l/2)-mid));break;} // centro
+            default: candidates=[...movable].sort(()=>rnd()-.5);break; // diversificación
+          }
+          const removed=candidates.slice(0,count),ids=new Set(removed.map(x=>x.id));
+          const base=placed.filter(x=>!ids.has(x.id));
+          if(!validateLayout(base,this.state.trailer).ok)continue;
+          const pool=[...pending,...removed];
+          const orders=[
+            [...pending,...removed],
+            [...pool].sort((a,b)=>(Number(b.qty)||1)-(Number(a.qty)||1)||area(b)-area(a)),
+            [...pool].sort((a,b)=>area(b)-area(a)),
+            [...pool].sort((a,b)=>Math.abs(aspect(a)-1)-Math.abs(aspect(b)-1)||area(b)-area(a)),
+            seededShuffle(pool,seed^iteration*2654435761)
+          ];
+          let candidateBest=null;
+          for(let oi=0;oi<orders.length&&performance.now()-started<budgetMs;oi++){
+            const width=Math.max(36,Math.min(mode==="deep"?180:mode==="balanced"?110:64,modeConfig.beamWidth*7));
+            const rebuilt=beamReinsert(base,orders[oi],width,seed+oi*8191+iteration*131);
+            // Segunda oportunidad después de compactar: intenta reinsertar una por una.
+            let stacks=clone(rebuilt.stacks||[]),left=clone(rebuilt.unplaced||[]);
+            const compacted=new LoadEngine(this.state.trailer).compact(stacks);if(compacted?.ok)stacks=compacted.stacks;
+            if(left.length){const next=[];for(const raw of left){const fit=insertBestPose(raw,stacks);if(fit)stacks.push(fit);else next.push(raw);}left=next;}
+            const sol={stacks,unplaced:left,efficiency:calculateLoadStatistics(stacks,this.state.trailer).efficiency};
+            const norm=accept(local,sol,strategy,`${variantName} · sacrificio/recrear ${pass}.${iteration}.${oi+1}`,best.mixedCount||0);
+            if(norm&&(!candidateBest||compare(norm,candidateBest)<0))candidateBest=norm;
+            if(candidateBest?.unplacedStacks===0)return candidateBest;
+          }
+          if(!candidateBest)continue;
+          const curObj=objective(current),candObj=objective(candidateBest),delta=candObj-curObj;
+          // Acepta temporalmente empeorar para escapar del óptimo local.
+          if(delta<0||rnd()<Math.exp(-Math.max(0,delta)/(2.5e8*Math.max(.06,temp))))current=candidateBest;
+          if(compare(candidateBest,winner)<0)winner=candidateBest;
+          temp*=.965;
+        }
+        return compare(winner,originalBest)<0?winner:null;
+      };
+
+      // v5.55: modo de cierre dirigido. Cuando quedan cinco pilas o menos,
+      // congela la mayor parte del trailer y reconstruye exhaustivamente ventanas
+      // locales alrededor de los huecos. El objetivo principal es cargar pallets,
+      // no conservar el acomodo previo.
+      const tryExactClosure=(best,strategy,local,variantName,pass,budgetMs)=>{
+        if(!(best.unplaced||[]).length||best.unplaced.length>5)return null;
+        const started=performance.now(),placed=clone(best.stacks||[]),pending=clone(best.unplaced||[]);
+        const used=Math.max(1,Geometry.usedLength(placed));
+        const targetLengths=pending.map(s=>Math.max(Number(s.w)||0,Number(s.l)||0));
+        const windowLength=Math.max(150,Math.min(260,Math.max(...targetLengths,0)*2.2));
+        const starts=new Set([0,Math.max(0,used-windowLength),Math.max(0,used*.25-windowLength/2),Math.max(0,used*.5-windowLength/2),Math.max(0,used*.75-windowLength/2)]);
+        // Añade ventanas centradas en cada pila grande y en zonas con huecos.
+        for(const s of placed){
+          const center=(Number(s.y)||0)+(Number(s.l)||0)/2;
+          if((Number(s.l)||0)>=70||area(s)>=2500)starts.add(Math.max(0,Math.min(used-windowLength,center-windowLength/2)));
+        }
+        let winner=null,attempt=0;
+        for(const start of [...starts].sort((a,b)=>a-b)){
+          if(performance.now()-started>budgetMs)break;
+          const end=start+windowLength;
+          const zone=placed.filter(s=>{
+            const a=Number(s.y)||0,b=a+(Number(s.l)||0);
+            return b>start&&a<end;
+          }).sort((a,b)=>(Number(a.y)||0)-(Number(b.y)||0));
+          if(!zone.length)continue;
+          // Limita la zona para evitar explosión combinatoria, conservando las
+          // pilas más cercanas a los pendientes y al borde de la ventana.
+          const selected=zone.sort((a,b)=>{
+            const va=Math.min(...pending.map(p=>Math.abs(area(a)-area(p)))),vb=Math.min(...pending.map(p=>Math.abs(area(b)-area(p))));
+            return va-vb||area(a)-area(b);
+          }).slice(0,Math.min(10,zone.length));
+          const ids=new Set(selected.map(x=>x.id)),base=placed.filter(x=>!ids.has(x.id)),pool=[...selected,...pending];
+          const permutations=[
+            pool,
+            [...pool].sort((a,b)=>(Number(b.qty)||1)-(Number(a.qty)||1)||area(b)-area(a)),
+            [...pool].sort((a,b)=>area(b)-area(a)),
+            [...pool].sort((a,b)=>Math.abs(aspect(a)-1)-Math.abs(aspect(b)-1)||area(b)-area(a)),
+            [...pending,...selected],
+            [...selected,...pending]
+          ];
+          for(const order of permutations){
+            if(performance.now()-started>budgetMs)break;
+            attempt++;
+            const width=Math.max(24,Math.min(120,modeConfig.beamWidth*5));
+            const rebuilt=beamReinsert(base,seededShuffle(order,740000+strategy.id*10000+pass*500+attempt*97),width,88000+attempt*131);
+            const sol={stacks:rebuilt.stacks,unplaced:rebuilt.unplaced,efficiency:calculateLoadStatistics(rebuilt.stacks,this.state.trailer).efficiency};
+            const norm=accept(local,sol,strategy,`${variantName} · cierre exacto ventana ${pass}.${attempt}`,best.mixedCount||0);
+            if(norm&&(!winner||compare(norm,winner)<0))winner=norm;
+            if(winner?.unplacedStacks===0)return winner;
+          }
+        }
+        return winner&&compare(winner,best)<0?winner:null;
+      };
+      const tryNeighborhoodRebuild=(best,strategy,local,variantName,pass)=>{
+        if(!(best.unplaced||[]).length)return null;
+        const placed=clone(best.stacks||[]);
+        // Desarma una pequeña zona al final del largo usado y la reconstruye junto
+        // con los pendientes en tres órdenes distintos.
+        const used=Geometry.usedLength(placed),zone=placed.filter(s=>(Number(s.y)||0)+(Number(s.l)||0)>=used-170).sort((a,b)=>(Number(b.y)||0)-(Number(a.y)||0)).slice(0,7);
+        if(!zone.length)return null;
+        const ids=new Set(zone.map(x=>x.id)),base=placed.filter(x=>!ids.has(x.id)),pool=[...zone,...clone(best.unplaced||[])];
+        let winner=null;
+        for(const order of ["area-desc","area-asc","square"]){
+          const rebuilt=greedyReinsert(base,pool,order);
+          const sol={stacks:rebuilt.stacks,unplaced:rebuilt.unplaced,efficiency:calculateLoadStatistics(rebuilt.stacks,this.state.trailer).efficiency};
+          const norm=accept(local,sol,strategy,`${variantName} · reconstrucción local ${order} ${pass}`,best.mixedCount||0);
+          if(norm&&(!winner||compare(norm,winner)<0))winner=norm;
+        }
+        return winner;
+      };
+      const refineStrategyCandidate=async(strategy,seedSol,local,variantName)=>{
+        let best=seedSol;if(!best)return null;
+        const refinementStarted=performance.now();
+        const phaseBudget=Math.min(modeConfig.globalMs*.22,mode==="fast"?9000:mode==="balanced"?26000:70000);
+        for(let pass=1;pass<=modeConfig.refinePasses+1;pass++){
+          if(performance.now()-refinementStarted>phaseBudget)break;
+          let improved=false;
+          // Mismo rescate que funciona al tocar “Buscar apilamiento”, ahora encadenado automáticamente.
+          if((best.unplaced||[]).length){
+            const vertical=mixedStackingPlan(best.stacks,best.unplaced,this.state.library,this.state.trailer);
+            if(vertical.ok&&vertical.stackedPallets>0){
+              const rebuiltInput=freshInput([...(vertical.stacks||[]),...(vertical.pending||[])]);
+              const report=await Optimizer.optimizeDeep(rebuiltInput,this.state.trailer,{totalMs:4200,quickMs:900,seed:Date.now()+strategy.id*700001+pass*17011,patterns:[],strategies:[]});
+              for(const sol of (report.solutions||[]).slice(0,6))accept(local,sol,strategy,`${variantName} · apilar/reconstruir ${pass}`,vertical.actions?.length||0);
+              local.sort(compare);const candidate=local[0];
+              if(candidate&&compare(candidate,best)<0){best=candidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: apilamiento automático mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,120));}
+            }
+          }
+          // Misma compactación que funciona con el botón manual, seguida de reinserción.
+          const engine=new LoadEngine(this.state.trailer);
+          const compacted=engine.compact(clone(best.stacks||[]));
+          if(compacted?.ok){
+            const placed=clone(compacted.stacks||[]),pending=[];
+            for(const raw of (best.unplaced||[])){
+              const candidate=findFirstValidPlacement(raw,placed,this.state.trailer);
+              if(candidate)placed.push(candidate);else pending.push(clone(raw));
+            }
+            const compactSol={stacks:placed,unplaced:pending,efficiency:calculateLoadStatistics(placed,this.state.trailer).efficiency};
+            const normalized=accept(local,compactSol,strategy,`${variantName} · compactar/reinsertar ${pass}`,best.mixedCount||0);
+            local.sort(compare);const candidate=local[0];
+            if(normalized&&candidate&&compare(candidate,best)<0){best=candidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: compactación automática mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,120));}
+          }
+          // Intercambio: puede sacar una o dos pilas pequeñas para insertar una
+          // pendiente de mayor valor y luego recuperar las retiradas.
+          if((best.unplaced||[]).length&&performance.now()-refinementStarted<=phaseBudget){
+            const swapped=tryExchangeRescue(best,strategy,local,variantName,pass);
+            local.sort(compare);const candidate=local[0];
+            if(swapped&&candidate&&compare(candidate,best)<0){best=candidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: intercambio local mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,110));}
+          }
+          // Reconstrucción de vecindario: desarma la cola y, cuando quedan pocas
+          // pendientes, amplía la zona al 25–35 % final usando beam search.
+          if((best.unplaced||[]).length&&performance.now()-refinementStarted<=phaseBudget){
+            const neighborhood=tryNeighborhoodRebuild(best,strategy,local,variantName,pass);
+            local.sort(compare);const candidate=local[0];
+            if(neighborhood&&candidate&&compare(candidate,best)<0){best=candidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: reconstrucción local mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,110));}
+          }
+          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs){
+            const closure=tryExactClosure(best,strategy,local,variantName,pass,Math.min(modeConfig.exactClosureMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs-(performance.now()-refinementStarted))));
+            local.sort(compare);let closureCandidate=local[0];
+            if(closure&&closureCandidate&&compare(closureCandidate,best)<0){best=closureCandidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: cierre dirigido mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,140));}
+          }
+          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs+modeConfig.ruinMs){
+            const ruinBudget=Math.min(modeConfig.ruinMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs+modeConfig.ruinMs-(performance.now()-refinementStarted)));
+            const ruined=tryRuinRecreateSacrifice(best,strategy,local,variantName,pass,ruinBudget);local.sort(compare);let ruinCandidate=local[0];
+            if(ruined&&ruinCandidate&&compare(ruinCandidate,best)<0){best=ruinCandidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: sacrificio y reconstrucción mejoró el cierre · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,150));}
+          }
+          if(best.unplacedStacks<=3&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs){
+            const wide=tryWideNeighborhoodRebuild(best,strategy,local,variantName,pass);local.sort(compare);let candidate=local[0];
+            if(wide&&candidate&&compare(candidate,best)<0){best=candidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: beam search mejoró el último tramo · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,120));}
+            if(best.unplacedStacks>0){
+              const meta=tryMetaheuristicRescue(best,strategy,local,variantName,pass,Math.min(modeConfig.lastMileMs,mode==="fast"?2200:mode==="balanced"?7500:18000));local.sort(compare);candidate=local[0];
+              if(meta&&candidate&&compare(candidate,best)<0){best=candidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: búsqueda tabú mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,120));}
+            }
+          }
+          if(best.unplacedStacks===0)break;
+          if(!improved&&best.unplacedStacks>3)break;
+          if(!improved&&best.unplacedStacks<=3&&pass>=modeConfig.refinePasses+1)break;
+        }
+        return best;
+      };
+
+      const geometryCache=new Map();
+      const totalSteps=strategies.reduce((n,st)=>n+Math.min(st.variants.length,modeConfig.maxVariants)*Math.min(st.profiles.length,modeConfig.maxProfiles),0);
+      let completedSteps=0;
+      const setStage=text=>{updateElapsed();const pct=Math.min(99,Math.round(completedSteps/Math.max(1,totalSteps)*100));$("optimizerSummary").textContent=`${text} · ${pct}%`;this.updateProgressiveStatus(`${text} · progreso ${pct}%`,true);};
+      try{
+        outerStrategies: for(const strategy of strategies){
+          if(!isActive()||performance.now()-optimizationStarted>modeConfig.globalMs)break;
+          // v5.55: reconstruye en una copia virtual. El gráfico conserva la última
+          // solución válida hasta que esta estrategia produzca su primer candidato.
+          $("optimizerSummary").textContent=`Estrategia ${strategy.id} de 3: ${strategy.label} · trabajando sobre copia virtual limpia…`;
+          await new Promise(r=>setTimeout(r,90));
+          const local=[];let liveBest=null,stagnant=0,lastBestLoaded=-1,lastBestPending=Infinity;
+          for(let vi=0;vi<Math.min(strategy.variants.length,modeConfig.maxVariants);vi++){
+            if(!isActive()||performance.now()-optimizationStarted>modeConfig.globalMs)break;
+            const variant=strategy.variants[vi],count=variant.input.length;
+            for(let pi=0;pi<Math.min(strategy.profiles.length,modeConfig.maxProfiles);pi++){
+              if(!isActive()||performance.now()-optimizationStarted>modeConfig.globalMs)break;
+              const profile=strategy.profiles[pi];
+              setStage(`Estrategia ${strategy.id} de 3: ${strategy.label} · ${variant.name} · motor ${profile}`);
+              await new Promise(r=>setTimeout(r,25));
+              // Primero crea un candidato parcial garantizado. El motor profundo
+              // compite contra él, pero nunca puede dejar la estrategia sin plano.
+              const safe=buildSafePartial(variant.input,profile);
+              if(safe)accept(local,safe,strategy,`${variant.name} · respaldo ${profile}`,variant.mixedCount);
+              local.sort(compare);
+              if(local[0]&&(!liveBest||compare(local[0],liveBest)<0)){
+                liveBest=clone(local[0]);previewStrategy(strategy,liveBest,`Estrategia ${strategy.id}: primera reconstrucción válida · ${liveBest.loadedStacks} dentro · ${liveBest.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,70));
+              }
+              // v5.55: reutiliza resultados geométricos equivalentes y limita el presupuesto según el modo.
+              const cacheKey=`${signature(variant.input)}::${profile}::${mode}`;
+              let cached=geometryCache.get(cacheKey);
+              if(!cached){
+                const report=await Optimizer.optimizeDeep(freshInput(variant.input),this.state.trailer,{totalMs:modeConfig.deepMs,quickMs:Math.min(800,modeConfig.deepMs*.35),seed:Date.now()+strategy.id*100003+vi*5003+pi*997,patterns:[],strategies:[]});
+                const direct=new LoadEngine(this.state.trailer,{timeLimitMs:modeConfig.directMs,patterns:[],strategies:[],seedOffset:strategy.id*9000+vi*701+pi*113,profile}).optimize(freshInput(variant.input));
+                cached={deep:clone(report.solutions||[]),direct:clone(direct.solutions||[])};geometryCache.set(cacheKey,cached);
+              }
+              for(const sol of (cached.deep||[]).slice(0,6))accept(local,sol,strategy,`${variant.name} · ${profile}`,variant.mixedCount);
+              for(const sol of (cached.direct||[]).slice(0,5))accept(local,sol,strategy,`${variant.name} · directo ${profile}`,variant.mixedCount);
+              local.sort(compare);
+              if(local[0]&&(!liveBest||compare(local[0],liveBest)<0)){
+                liveBest=clone(local[0]);previewStrategy(strategy,liveBest,`Estrategia ${strategy.id}: mejor parcial visible · ${liveBest.loadedStacks} dentro · ${liveBest.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,90));
+              }
+              completedSteps++;
+              const current=local[0];
+              if(current&&(current.loadedPallets>lastBestLoaded||current.unplacedStacks<lastBestPending)){lastBestLoaded=current.loadedPallets;lastBestPending=current.unplacedStacks;stagnant=0;}else stagnant++;
+              if(local.some(x=>x.unplacedStacks===0))break;
+              if(stagnant>=modeConfig.maxStagnant){setStage(`Estrategia ${strategy.id}: parada anticipada por falta de mejora`);break;}
+            }
+            if(local.some(x=>x.unplacedStacks===0))break;
+          }
+          local.sort(compare);
+          let winner=local[0]||null;
+          if(winner){
+            $("optimizerSummary").textContent=`Estrategia ${strategy.id} de 3: encadenando apilamiento, reconstrucción y compactación…`;
+            winner=await refineStrategyCandidate(strategy,winner,local,winner.variantName||strategy.label)||winner;
+            local.sort(compare);winner=local[0]||winner;
+          }
+          if(winner){
+            const frozen={...winner,stacks:clone(winner.stacks||[]),unplaced:clone(winner.unplaced||[])};
+            strategyResults.set(strategy.id,frozen);
+            // Vista previa real de la mejor solución de esta estrategia. La siguiente
+            // estrategia vuelve a partir de rawOriginal, por lo que no hereda este plano.
+            this.state.stacks=clone(frozen.stacks);this.state.pending=clone(frozen.unplaced||[]);this.render();
+            $("optimizerSummary").textContent=`Estrategia ${strategy.id} guardada: ${frozen.loadedStacks} pilas dentro · ${frozen.unplacedStacks} pendientes. Preparando la siguiente desde cero…`;
+            await new Promise(r=>setTimeout(r,180));
+            if(frozen.unplacedStacks===0){setStage(`Solución completa encontrada por la estrategia ${strategy.id}; búsqueda finalizada antes del límite`);break outerStrategies;}
+          }
+        }
+
+        const strategyWinners=strategies.map(s=>strategyResults.get(s.id)).filter(Boolean);
+        if(!strategyWinners.length)throw new Error("No se encontró ninguna distribución parcial válida");
+        for(const candidate of strategyWinners)Object.assign(candidate,intelligentSolutionRank(candidate,this.state.trailer,strategyWinners[0]||null));
+        const best=[...strategyWinners].sort(compare)[0];
+        this.lastOptimizationMs=performance.now()-optimizationStarted;this.lastWinningStrategy=best.family;
+        this.lastSolutions=strategyWinners.sort((a,b)=>a.strategyId-b.strategyId);this.lastUnplaced=clone(best.unplaced||[]);
+        this.store.remember();this.state.stacks=clone(best.stacks);this.state.pending=clone(best.unplaced||[]);this.hasOptimized=true;
+        this.lastStackingResult={mode:"independent-live-strategies-v553",variant:best.family,mixedCount:best.mixedCount||0,allPallets:totalPallets,loadedPallets:best.loadedPallets};
+        this.render();this.renderSolutions(this.lastSolutions,beforeUsed,best.strategyId);
+        const leftText=best.unplacedStacks?` · ${best.unplacedStacks} pilas pendientes (${best.unplacedPallets} pallets)`:' · carga completa';
+        $("optimizerSummary").textContent=`Ganó la estrategia ${best.strategyId}: ${best.strategyLabel}. ${best.loadedStacks} pilas / ${best.loadedPallets} pallets${leftText} · modo ${modeConfig.label} · ${(this.lastOptimizationMs/1000).toFixed(1)} s`;
+        this.updateProgressiveStatus(best.unplacedStacks?`Se guardó y mostró la mejor solución independiente de cada estrategia. Se aplicó la ganadora; quedaron ${best.unplacedStacks} pilas pendientes.`:`Solución completa encontrada y aplicada por la estrategia ${best.strategyId}.`,false);$("stopProgressiveBtn").hidden=true;
+        if(!best.unplacedStacks){this.patternMemory.learnComplete(best.stacks,this.state.trailer);this.recordRecentOptimization();}
+        this.toast(`Se aplicó la estrategia ${best.strategyId}, ganadora entre tres búsquedas independientes`);
+      }catch(error){
+        // Nunca deja el plano vacío si todas las búsquedas fallan.
+        this.state.stacks=clone(visualBackup.stacks);this.state.pending=clone(visualBackup.pending);this.state.selectedId=visualBackup.selectedId;this.render();
+        this.lastOptimizationMs=performance.now()-optimizationStarted;this.updateProgressiveStatus(error?.message||"No se pudo optimizar; se restauró el plano anterior.",false);$("optimizerSummary").textContent=error?.message||"No se pudo optimizar; se restauró el plano anterior";this.toast(error?.message||"No se pudo optimizar; se restauró el plano anterior");
+      }finally{
+        clearInterval(elapsedTimer);updateElapsed();
+        if(this.currentOptimizationSessionId===sessionId)this.currentOptimizationSessionId=null;
+        const btn=$("stopProgressiveBtn");if(btn)btn.hidden=true;
+      }
     }
-    renderSolutions(solutions,beforeUsed){
+    renderSolutions(solutions,beforeUsed,winningStrategyId=null){
       const root=$("optimizerResults");root.innerHTML="";
-      solutions.forEach((sol,i)=>{
+      solutions.forEach(sol=>{
         const card=document.createElement("article");card.className="optimizerResult";
+        const isWinner=Number(sol.strategyId)===Number(winningStrategyId);
         const left=sol.unplacedStacks?` · <b>${sol.unplacedStacks} fuera</b> (${sol.unplacedPallets} pallets): ${sol.unplaced.slice(0,3).map(s=>s.name).join(", ")}${sol.unplaced.length>3?"…":""}`:" · <b>Carga completa</b>";
-        const medal=i===0?"🥇":i===1?"🥈":"🥉";
-        const label=sol.family?`${medal} ${i===0?"Mejor solución":`Alternativa ${i+1}`} · ${sol.family}`:`${medal} ${i===0?"Mejor solución":`Alternativa ${i+1}`}`;
+        const medal=sol.strategyId===1?"⭐":sol.strategyId===2?"⭐⭐":"⭐⭐⭐";
+        const label=`${medal} Estrategia ${sol.strategyId} · ${sol.strategyLabel}${isWinner?" · GANADORA":""}`;
+        const pendingGroups=new Map();for(const x of (sol.unplaced||[])){const k=`${x.w}×${x.l}`;pendingGroups.set(k,(pendingGroups.get(k)||0)+1)}
+        const pendingDetail=[...pendingGroups.entries()].map(([k,n])=>`${n} de ${k}`).join(', ');
         const rank=Number(sol.rankScore)||0,reasons=(sol.rankReasons||[]).join(" · ");
-        card.innerHTML=`<div><strong>${label}</strong><p><b>${rank.toFixed(1)} puntos · ${sol.rankLabel||"Evaluada"}</b>${reasons?` · ${reasons}`:""}</p><p>${sol.loadedStacks} pilas / ${sol.loadedPallets} pallets dentro · ${sol.used.toFixed(1)}" usados · ${sol.efficiency.toFixed(1)}% eficiencia · ${sol.rotated||0} giradas${left}</p></div><button type="button">Aplicar</button>`;
-        card.querySelector("button").onclick=()=>{const validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Solución inválida: ${explainValidation(validation)}`);this.store.remember();this.state.stacks=clone(sol.stacks);this.state.pending=clone(sol.unplaced||[]);this.hasOptimized=true;this.lastWinningStrategy=sol.family||label;this.render();this.toast("Solución validada y aplicada");};root.appendChild(card);
+        const used=Number.isFinite(sol.used)?sol.used:(Number.isFinite(sol.usedLength)?sol.usedLength:Geometry.usedLength(sol.stacks||[]));
+        const efficiency=Number(sol.efficiency)||0;
+        card.innerHTML=`<div><strong>${label}</strong><p><b>${rank.toFixed(1)} puntos · ${sol.rankLabel||"Evaluada"}</b>${reasons?` · ${reasons}`:""}</p><p>${sol.loadedStacks} pilas / ${sol.loadedPallets} pallets dentro · ${used.toFixed(1)}" usados · ${efficiency.toFixed(1)}% eficiencia · ${sol.rotated||0} giradas${left}</p><p class="muted">Mejor variante interna: ${sol.variantName||"búsqueda principal"}</p></div><button type="button">${isWinner?"Aplicada":"Aplicar"}</button>`;
+        card.querySelector("button").onclick=()=>{const validation=validateLayout(sol.stacks,this.state.trailer);if(!validation.ok)return this.toast(`Solución inválida: ${explainValidation(validation)}`);this.store.remember();this.state.stacks=clone(sol.stacks);this.state.pending=clone(sol.unplaced||[]);this.hasOptimized=true;this.lastWinningStrategy=sol.family||label;this.render();this.toast(`Estrategia ${sol.strategyId} validada y aplicada`);};root.appendChild(card);
       });
     }
     demo(){
@@ -2414,13 +3060,24 @@ function normalizeLibraryItem(raw={}){
       add("48×40",48,40,0,0);add("48×40",48,40,48,0);add("42×42",42,42,0,42);add("42×42",42,42,54,42);add("Pila desviada",42,42,49,90);
       this.hasOptimized=false;this.syncTrailerInputs();this.render();
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.41",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.41.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    buildExportSummary(){
+      const pending=Array.isArray(this.state.pending)?this.state.pending:[],stacks=Array.isArray(this.state.stacks)?this.state.stacks:[];
+      const group=list=>{const m=new Map();for(const s of list){const k=`${Number(s.l)||0}×${Number(s.w)||0}`;const q=Number(s.qty)||1;m.set(k,(m.get(k)||0)+q)}return [...m.entries()].map(([measure,qty])=>({measure,qty}));};
+      const stacked=[];
+      for(const s of stacks){if(!Array.isArray(s.layers)||s.layers.length<2)continue;const base=s.layers[0],tops=s.layers.slice(1);for(const top of tops)stacked.push({base:`${Number(base.l)||0}×${Number(base.w)||0}`,baseQty:Number(base.qty)||0,top:`${Number(top.l)||0}×${Number(top.w)||0}`,topQty:Number(top.qty)||0,total:(Number(base.qty)||0)+(Number(top.qty)||0)});}
+      return {strategy:this.lastWinningStrategy||'Manual',loadedPallets:stacks.reduce((n,x)=>n+(Number(x.qty)||1),0),loadedStacks:stacks.length,pendingPallets:pending.reduce((n,x)=>n+(Number(x.qty)||1),0),pendingStacks:pending.length,pendingGroups:group(pending),stacked};
+    }
+    createShareCanvas(){
+      const plan=createPlanCanvas(this.state.stacks,this.state.trailer,{title:'LoadMaster AI · Plano de carga'}),summary=this.buildExportSummary();
+      const extra=280+Math.max(0,summary.pendingGroups.length-1)*28+Math.max(0,summary.stacked.length-1)*28,canvas=document.createElement('canvas');canvas.width=plan.width;canvas.height=plan.height+extra;const ctx=canvas.getContext('2d');ctx.fillStyle='#eef1f5';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(plan,0,0);let y=plan.height+38;ctx.fillStyle='#111827';ctx.font='700 24px system-ui, sans-serif';ctx.fillText('Resumen de la solución',34,y);y+=34;ctx.font='16px system-ui, sans-serif';ctx.fillText(`Estrategia: ${summary.strategy}`,34,y);y+=26;ctx.fillText(`${summary.loadedStacks} pilas / ${summary.loadedPallets} pallets dentro · ${summary.pendingStacks} pilas / ${summary.pendingPallets} pallets pendientes`,34,y);y+=30;ctx.font='700 17px system-ui, sans-serif';ctx.fillText('Sobrantes:',34,y);y+=24;ctx.font='15px system-ui, sans-serif';if(!summary.pendingGroups.length){ctx.fillText('Ninguno. Carga completa.',52,y);y+=24}else for(const g of summary.pendingGroups){ctx.fillText(`• ${g.qty} pallets de ${g.measure}`,52,y);y+=24}ctx.font='700 17px system-ui, sans-serif';ctx.fillText('Apilamientos mixtos:',34,y);y+=24;ctx.font='15px system-ui, sans-serif';if(!summary.stacked.length){ctx.fillText('No se realizaron apilamientos mixtos.',52,y)}else for(const a of summary.stacked){ctx.fillText(`• ${a.topQty} de ${a.top} sobre ${a.baseQty} de ${a.base} · altura total ${a.total}`,52,y);y+=24}return canvas;
+    }
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.55",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.55.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
       if(!validation.ok)return this.toast(`Corrige la carga antes de guardar la imagen: ${explainValidation(validation)}`);
       try{
-        const canvas=createPlanCanvas(this.state.stacks,this.state.trailer,{title:"LoadMaster AI · Plano de carga"});
+        const canvas=this.createShareCanvas();
         canvas.toBlob(blob=>{if(!blob)return this.toast("No se pudo crear la imagen");const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`loadmaster-plano-${new Date().toISOString().slice(0,10)}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);this.toast("Imagen PNG guardada");},"image/png");
       }catch{this.toast("No se pudo guardar la imagen");}
     }
@@ -2439,8 +3096,8 @@ function normalizeLibraryItem(raw={}){
       rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle="#6b7280";ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle="#111827";ctx.fillText(String(row[1]),x+205,y);});
       if(info.reasons.length){ctx.fillStyle="#92400e";ctx.font="19px system-ui, sans-serif";ctx.fillText(`Observación: ${info.reasons.join(" · ")}`,85,480);}
       const plan=createPlanCanvas(this.state.stacks,this.state.trailer,{title:"Plano de carga"}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;
-      ctx.fillStyle="#fff";ctx.fillRect(55,535,1130,1160);ctx.strokeStyle="#d1d5db";ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);
-      ctx.fillStyle="#6b7280";ctx.font="17px system-ui, sans-serif";ctx.textAlign="center";ctx.fillText("Generado por LoadMaster AI · Verifique el plano antes de ejecutar la carga.",620,1730);ctx.textAlign="left";return canvas;
+      ctx.fillStyle="#fff";ctx.fillRect(55,535,1130,980);ctx.strokeStyle="#d1d5db";ctx.strokeRect(55,535,1130,980);ctx.drawImage(plan,x,y,w,h);
+      const summary=this.buildExportSummary();ctx.fillStyle="#111827";ctx.font="700 22px system-ui, sans-serif";ctx.textAlign="left";ctx.fillText("Resumen de sobrantes y apilamientos",85,1580);ctx.font="17px system-ui, sans-serif";let sy=1612;const pendingText=summary.pendingGroups.length?summary.pendingGroups.map(g=>`${g.qty} de ${g.measure}`).join(" · "):"Ninguno";ctx.fillText(`Pendientes: ${summary.pendingStacks} pilas / ${summary.pendingPallets} pallets · ${pendingText}`,85,sy);sy+=27;const stackText=summary.stacked.length?summary.stacked.map(a=>`${a.topQty} ${a.top} sobre ${a.baseQty} ${a.base}`).join(" · "):"Sin apilamientos mixtos";ctx.fillText(`Apilado: ${stackText}`,85,sy);ctx.fillStyle="#6b7280";ctx.font="17px system-ui, sans-serif";ctx.textAlign="center";ctx.fillText("Generado por LoadMaster AI v5.55 · Verifique el plano antes de ejecutar la carga.",620,1730);ctx.textAlign="left";return canvas;
     }
     makeProfessionalPdf(){return canvasToPdfBlob(this.createProfessionalReportCanvas());}
     saveProfessionalPdf(){
@@ -2450,7 +3107,7 @@ function normalizeLibraryItem(raw={}){
       try{
         const blob=this.makeProfessionalPdf(),fileName=`loadmaster-reporte-${new Date().toISOString().slice(0,10)}.pdf`;
         const file=typeof File!=="undefined"?new File([blob],fileName,{type:"application/pdf"}):null;
-        const text=`Plano de carga LoadMaster AI · ${this.state.stacks.length} pilas · ${calculateEfficiencyIndicator(this.state.stacks,this.state.pending,this.state.trailer).score.toFixed(1)}% de eficiencia.`;
+        const summary=this.buildExportSummary(),text=`Plano de carga LoadMaster AI · ${summary.loadedStacks} pilas / ${summary.loadedPallets} pallets dentro · ${summary.pendingStacks} pilas / ${summary.pendingPallets} pallets pendientes · ${calculateEfficiencyIndicator(this.state.stacks,this.state.pending,this.state.trailer).score.toFixed(1)}% de eficiencia.`;
         if(file&&navigator.share&&(!navigator.canShare||navigator.canShare({files:[file]}))){await navigator.share({title:"Reporte LoadMaster AI",text,files:[file]});return this.toast("Reporte compartido");}
         const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fileName;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);
         window.open(`https://wa.me/?text=${encodeURIComponent(text+" El PDF quedó guardado para adjuntarlo.")}`,"_blank","noopener");this.toast("PDF guardado; adjúntalo en WhatsApp");
@@ -2536,7 +3193,7 @@ function normalizeLibraryItem(raw={}){
 
 
 
-// v5.41: apilamiento previo y posterior con reducción real del conteo de pilas
+// v5.55: apilamiento previo y posterior con reducción real del conteo de pilas
 (function initThemeController(){
   const STORAGE_KEY="loadmaster-theme";
   const root=document.documentElement;
@@ -2570,4 +3227,4 @@ function normalizeLibraryItem(raw={}){
   media?.addEventListener?.("change",()=>{if(saved==="system")apply(saved);});
 })();
 
-new App();
+window.loadmasterApp=new App();
