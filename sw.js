@@ -1,8 +1,8 @@
-const CACHE="loadmaster-ai-v5.55-auto-stack";
+const CACHE="loadmaster-ai-v5.57-auto-stack";
 const ASSETS=[
-  "./index.html?v=5.55",
-  "./styles.css?v=5.55",
-  "./app.js?v=5.55",
+  "./index.html?v=5.57",
+  "./styles.css?v=5.57",
+  "./app.js?v=5.57",
   "./manifest.webmanifest",
   "./icon.svg",
   "./optimizer.js",
@@ -24,9 +24,9 @@ self.addEventListener("fetch", event => {
   if(request.mode === "navigate") {
     event.respondWith(fetch(request, {cache:"no-store"}).then(response => {
       const copy=response.clone();
-      caches.open(CACHE).then(cache=>cache.put("./index.html?v=5.55", copy));
+      caches.open(CACHE).then(cache=>cache.put("./index.html?v=5.57", copy));
       return response;
-    }).catch(()=>caches.match("./index.html?v=5.55")));
+    }).catch(()=>caches.match("./index.html?v=5.57")));
     return;
   }
   event.respondWith(fetch(request).then(response => {

@@ -1374,7 +1374,7 @@ function runPortfolioSearch(input,trailer,{totalTimeMs=21000,patterns=[],strateg
 }
 
 
-// Fachada pública del optimizador. v5.55 corrige el error de integración
+// Fachada pública del optimizador. v5.57 corrige el error de integración
 // "Optimizer is not defined" y garantiza una búsqueda desde una copia limpia.
 const Optimizer = Object.freeze({
   async optimizeDeep(input, trailer, options = {}) {
@@ -1791,11 +1791,26 @@ function normalizeLibraryItem(raw={}){
     if(upper.canRotate&&Math.abs(upper.w-upper.l)>EPS)opts.push({w:upper.l,l:upper.w,rotated:true});
     return opts.filter(o=>o.w<=base.w+EPS&&o.l<=base.l+EPS).sort((a,b)=>(base.w*base.l-a.w*a.l)-(base.w*base.l-b.w*b.l))[0]||null;
   }
-  function buildStackingFirstLoad(placedInput,pendingInput,library=[],profile='balanced'){
-    // v5.55: forma primero las pilas normales y solo después combina sobrantes.
+  function buildStackingFirstLoad(placedInput,pendingInput,library=[],profile='balanced',focusPending=[]){
+    // v5.57: forma primero las pilas normales y solo después combina sobrantes.
     // Esto evita crear mezclas arbitrarias y descubre casos como 5 de 145×26
     // abajo + 5 de 120×24 arriba, reduciendo una posición de piso.
     const groups=originalStackGroups(placedInput,pendingInput,library);
+    // v5.57: cuando el optimizador está cerrando una carga, puede indicar qué
+    // pendientes son prioritarias. El apilador favorece que esas medidas queden
+    // como capa superior de una pila mixta válida, en vez de gastar capacidad
+    // vertical en piezas pequeñas que no están bloqueando el cierre.
+    const focus=(focusPending||[]).map((p,i)=>({
+      w:Number(p.w)||0,l:Number(p.l)||0,qty:Math.max(1,Number(p.qty)||1),rank:i
+    })).sort((a,b)=>b.qty-a.qty||b.w*b.l-a.w*a.l);
+    const focusPriority=item=>{
+      let best=0;
+      for(let i=0;i<focus.length;i++){
+        const f=focus[i],same=(Math.abs(item.w-f.w)<EPS&&Math.abs(item.l-f.l)<EPS)||(Math.abs(item.w-f.l)<EPS&&Math.abs(item.l-f.w)<EPS);
+        if(same)best=Math.max(best,2500000+f.qty*220000+(focus.length-i)*35000);
+      }
+      return best;
+    };
     const full=[];
     for(const g of groups){
       let remaining=Math.max(0,Math.round(Number(g.qty)||0));
@@ -1822,7 +1837,8 @@ function normalizeLibraryItem(raw={}){
       const footprintWaste=base.w*base.l-orientation.w*orientation.l;
       const exactBonus=Math.abs(total-limit)<EPS?100000:0;
       const profileBonus=profile==='tight'?-footprintWaste:profile==='large-base'?base.w*base.l:0;
-      const score=exactBonus+positionsSaved*10000+fillRatio*1000-footprintWaste+profileBonus*.01;
+      const focusBonus=focusPriority(upper);
+      const score=exactBonus+focusBonus+positionsSaved*10000+fillRatio*1000-footprintWaste+profileBonus*.01;
       candidates.push({bi,ui,base,upper,orientation,limit,total,score});
     }
     candidates.sort((a,b)=>b.score-a.score||b.base.w*b.base.l-a.base.w*a.base.l);
@@ -2003,7 +2019,7 @@ function normalizeLibraryItem(raw={}){
     constructor(){
       this.store=new Store(); this.patternMemory=new PatternMemory(); this.strategyMemory=new StrategyMemory(); this.visualHistory=new VisualHistoryMemory(); this.installPrompt=null; this.lastSolutions=[]; this.referenceImage=null; this.editingPatternId=null; this.lastOptimizationMs=0; this.lastWinningStrategy="Manual / sin optimizar"; this.currentOptimizationSessionId=null; this.selectedHistoryIds=new Set(); this.manualEditMode=false; this.progressiveSession=null; this.pendingProgressiveImprovement=null; this.photoReaderFile=null; this.photoReaderDataUrl=""; this.photoReaderItems=[]; this.lastStackingResult=null; this.hasOptimized=false;
       this.bind(); this.syncTrailerInputs(); this.restoreAccordionState(); this.render();
-      if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js?v=5.55", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+      if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js?v=5.57", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
     }
     get state(){return this.store.state;}
     toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2100);}
@@ -2219,7 +2235,7 @@ function normalizeLibraryItem(raw={}){
     duplicateCatalogItem(id){const source=this.state.library.find(x=>String(x.id)===String(id));if(!source)return;const copy=normalizeLibraryItem({...clone(source),id:uid(),name:`${source.name} copia`,favorite:false});this.state.library.push(copy);this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet duplicado");}
     deleteCatalogItem(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;if(!confirm(`¿Eliminar “${item.name}” del catálogo? Los archivos y patrones ya guardados conservarán sus propios datos.`))return;this.state.library=this.state.library.filter(x=>String(x.id)!==String(id));this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast("Pallet eliminado");}
     toggleCatalogFavorite(id){const item=this.state.library.find(x=>String(x.id)===String(id));if(!item)return;item.favorite=!item.favorite;this.store.persistLibrary();this.renderLibrary();this.renderCatalog();}
-    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.55",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
+    exportCatalog(){const blob=new Blob([JSON.stringify({version:"5.57",type:"loadmaster-pallet-catalog",library:this.state.library},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-catalogo-pallets.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);this.toast("Catálogo exportado");}
     async importCatalog(e){const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());const incoming=Array.isArray(data)?data:data.library;if(!Array.isArray(incoming))throw new Error();const normalized=incoming.map(normalizeLibraryItem).filter(x=>x.w>0&&x.l>0);const byKey=new Map(this.state.library.map(x=>[`${x.name}|${x.l}|${x.w}`,x]));for(const item of normalized){const key=`${item.name}|${item.l}|${item.w}`;if(byKey.has(key))Object.assign(byKey.get(key),item,{id:byKey.get(key).id});else this.state.library.push({...item,id:uid()});}this.store.persistLibrary();this.renderLibrary();this.renderCatalog();this.toast(`${normalized.length} pallets importados o actualizados`);}catch{this.toast("Catálogo no válido");}e.target.value="";}
     renderCatalog(){this.renderLibrary();}
 
@@ -2405,7 +2421,7 @@ function normalizeLibraryItem(raw={}){
       const saved=this.filterAndSortHistory(this.visualHistory.saved,false),recent=this.filterAndSortHistory(this.visualHistory.recent,true);$('savedHistoryCount').textContent=`(${saved.length})`;$('recentHistoryCount').textContent=`(${recent.length})`;renderList($('savedHistoryList'),this.visualHistory.saved,false);renderList($('recentHistoryList'),this.visualHistory.recent,true);this.updateHistorySelectionToolbar();this.updateHistorySummary();
     }
     createHistoryReportCanvas(entry){
-      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=920,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.55',620,1730);return canvas;
+      const stacks=entry.stacks||[],pending=entry.pending||[],trailer=entry.trailer||{width:96,length:628},info=calculateEfficiencyIndicator(stacks,pending,trailer),canvas=document.createElement('canvas');canvas.width=1240;canvas.height=1754;const ctx=canvas.getContext('2d');ctx.fillStyle='#f3f4f6';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#111827';ctx.fillRect(0,0,canvas.width,170);ctx.fillStyle='#fff';ctx.font='700 46px system-ui, sans-serif';ctx.fillText('LOADMASTER AI',70,72);ctx.font='23px system-ui, sans-serif';ctx.fillText(entry.name||'Reporte de carga',70,118);ctx.textAlign='right';ctx.font='19px system-ui, sans-serif';ctx.fillText(new Date(entry.updatedAt||entry.createdAt).toLocaleString('es-MX'),1170,94);ctx.textAlign='left';ctx.fillStyle='#fff';ctx.strokeStyle='#d1d5db';ctx.lineWidth=2;ctx.fillRect(55,205,1130,300);ctx.strokeRect(55,205,1130,300);ctx.fillStyle='#111827';ctx.font='700 31px system-ui, sans-serif';ctx.fillText(`Eficiencia ${info.score.toFixed(1)}% · ${info.label}`,85,260);ctx.font='21px system-ui, sans-serif';const rows=[[`Tráiler`,`${trailer.length}" × ${trailer.width}"`],[`Carga`,`${stacks.length} pilas · ${info.loaded} pallets`],[`Pendientes`,`${info.left}`],[`Ocupación`,`${info.utilization.toFixed(1)}%`],[`Área usada`,`${Math.round(info.usedArea).toLocaleString('es-MX')} in²`],[`Largo usado`,`${info.usedLength.toFixed(1)}"`],[`Tiempo`,entry.optimizationMs?`${(entry.optimizationMs/1000).toFixed(1)} s`:'—'],[`Estrategia`,entry.strategy||'Manual']];rows.forEach((row,i)=>{const col=i%2,x=85+col*555,y=310+Math.floor(i/2)*48;ctx.fillStyle='#6b7280';ctx.fillText(`${row[0]}:`,x,y);ctx.fillStyle='#111827';ctx.fillText(String(row[1]),x+190,y);});const plan=createPlanCanvas(stacks,trailer,{title:'Plano de carga'}),maxW=1080,maxH=920,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;ctx.fillStyle='#fff';ctx.fillRect(55,535,1130,1160);ctx.strokeStyle='#d1d5db';ctx.strokeRect(55,535,1130,1160);ctx.drawImage(plan,x,y,w,h);ctx.fillStyle='#6b7280';ctx.font='17px system-ui, sans-serif';ctx.textAlign='center';ctx.fillText('Reporte automático del historial · LoadMaster AI v5.57',620,1730);return canvas;
     }
     exportHistoryEntriesPdf(entries){try{const valid=(entries||[]).slice(0,10);if(!valid.length)return this.toast('Selecciona al menos una carga');const blob=canvasesToPdfBlob(valid.map(e=>this.createHistoryReportCanvas(e))),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`loadmaster-reportes-${new Date().toISOString().slice(0,10)}.pdf`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1800);this.toast(`${valid.length} reporte${valid.length===1?'':'s'} exportado${valid.length===1?'':'s'} en PDF`);}catch(error){this.toast(error.message||'No se pudieron crear los reportes');}}
     exportSelectedHistoryPdf(){this.exportHistoryEntriesPdf(this.getSelectedHistoryEntries());}
@@ -2495,9 +2511,9 @@ function normalizeLibraryItem(raw={}){
       const optimizationStarted=performance.now(),sessionId=uid();this.currentOptimizationSessionId=sessionId;
       const mode=$("optimizationMode")?.value||"balanced";
       const modeConfig={
-        fast:{label:"Rápido",globalMs:60000,deepMs:1200,directMs:650,maxVariants:2,maxProfiles:1,refinePasses:1,maxStagnant:2,beamWidth:6,lastMileMs:6500,exactClosureMs:3500,ruinMs:4200},
-        balanced:{label:"Balanceado",globalMs:180000,deepMs:2800,directMs:1400,maxVariants:4,maxProfiles:2,refinePasses:2,maxStagnant:4,beamWidth:12,lastMileMs:22000,exactClosureMs:18000,ruinMs:18000},
-        deep:{label:"Profundo",globalMs:420000,deepMs:6200,directMs:2800,maxVariants:99,maxProfiles:99,refinePasses:3,maxStagnant:8,beamWidth:20,lastMileMs:65000,exactClosureMs:52000,ruinMs:50000}
+        fast:{label:"Rápido",globalMs:60000,deepMs:1200,directMs:650,maxVariants:2,maxProfiles:1,refinePasses:1,maxStagnant:2,beamWidth:6,lastMileMs:6500,exactClosureMs:3500,focusRescueMs:4500,regionalMs:4200,ruinMs:4200},
+        balanced:{label:"Balanceado",globalMs:180000,deepMs:2800,directMs:1400,maxVariants:4,maxProfiles:2,refinePasses:2,maxStagnant:4,beamWidth:12,lastMileMs:22000,exactClosureMs:18000,focusRescueMs:16000,regionalMs:18000,ruinMs:18000},
+        deep:{label:"Profundo",globalMs:420000,deepMs:6200,directMs:2800,maxVariants:99,maxProfiles:99,refinePasses:3,maxStagnant:8,beamWidth:20,lastMileMs:65000,exactClosureMs:52000,focusRescueMs:42000,regionalMs:52000,ruinMs:50000}
       }[mode];
       const isActive=()=>this.currentOptimizationSessionId===sessionId;
       const elapsedEl=$("optimizationElapsed");
@@ -2507,7 +2523,7 @@ function normalizeLibraryItem(raw={}){
       if(!allInput.length)return this.toast("No hay pilas");
       $("optimizerPanel").hidden=false;$("optimizerSummary").textContent="Preparando tres búsquedas realmente independientes…";$("optimizerResults").innerHTML="";this.updateProgressiveStatus("Cada estrategia conservará su mejor solución propia.",true);
       const rawOriginal=clone(allInput),beforeUsed=Geometry.usedLength(this.state.stacks),baselineStats={loaded:this.state.stacks.reduce((n,s)=>n+(Number(s.qty)||1),0),left:(this.state.pending||[]).reduce((n,s)=>n+(Number(s.qty)||1),0),used:beforeUsed};
-      // v5.55: el plano visible nunca se destruye durante la búsqueda. Cada
+      // v5.57: el plano visible nunca se destruye durante la búsqueda. Cada
       // estrategia trabaja sobre copias virtuales y solo publica candidatos válidos.
       const visualBackup={stacks:clone(this.state.stacks||[]),pending:clone(this.state.pending||[]),selectedId:this.state.selectedId};
       const totalPallets=rawOriginal.reduce((n,s)=>n+(Number(s.qty)||1),0);
@@ -2631,7 +2647,7 @@ function normalizeLibraryItem(raw={}){
         const ids=new Set(stacks.map(x=>x.id)),pending=[...unplaced,...source.filter(x=>!ids.has(x.id)&&!unplaced.some(u=>u.id===x.id))];
         return {name:"Reconstrucción segura",family:"Fallback geométrico",stacks,unplaced:pending,efficiency:calculateLoadStatistics(stacks,this.state.trailer).efficiency};
       };
-      // v5.55: fase posterior a la primera solución válida. No se conforma con
+      // v5.57: fase posterior a la primera solución válida. No se conforma con
       // el primer plano aceptable: compacta, prueba giros, intercambios 1↔N y
       // pequeñas reconstrucciones locales antes de declarar una estrategia terminada.
       const orientationOptions=raw=>{
@@ -2735,7 +2751,7 @@ function normalizeLibraryItem(raw={}){
         }
         return compare(winner,best)<0?winner:null;
       };
-      // v5.55: Large Neighborhood Search (ruin-and-recreate). Cuando quedan
+      // v5.57: Large Neighborhood Search (ruin-and-recreate). Cuando quedan
       // pocas pilas, deja de proteger el plano actual: destruye deliberadamente
       // vecindarios de 15–60 % de las pilas móviles, mezcla esas pilas con las
       // pendientes y reconstruye desde cero. Puede aceptar temporalmente un estado
@@ -2803,7 +2819,188 @@ function normalizeLibraryItem(raw={}){
         return compare(winner,originalBest)<0?winner:null;
       };
 
-      // v5.55: modo de cierre dirigido. Cuando quedan cinco pilas o menos,
+      // v5.57: RESCATE ENFOCADO DE PENDIENTES. Cuando quedan cinco pilas o
+      // menos, deja de preguntar "qué parte del plano puedo mejorar" y pregunta
+      // "cómo absorbo ESTA medida pendiente". Primero ataca el grupo con más
+      // pallets, reconstruye el apilamiento con esa medida como prioridad y solo
+      // después pasa a la siguiente. Los estados intermedios pueden empatar en
+      // pallets totales si reducen la medida objetivo; la solución final solo se
+      // publica si mejora el resultado global.
+      const tryFocusedPendingRescue=async(best,strategy,local,variantName,pass,budgetMs)=>{
+        if(!(best.unplaced||[]).length||best.unplaced.length>5)return null;
+        const started=performance.now(),originalBest=best;
+        let current=best,winner=best,round=0;
+        const measureKey=s=>{
+          const a=Number(s.w)||0,b=Number(s.l)||0;
+          return `${Math.min(a,b)}x${Math.max(a,b)}`;
+        };
+        const targetRemaining=(sol,key)=>(sol.unplaced||[]).filter(x=>measureKey(x)===key).reduce((n,x)=>n+(Number(x.qty)||1),0);
+        const targetStacks=(sol,key)=>(sol.unplaced||[]).filter(x=>measureKey(x)===key).length;
+        while(performance.now()-started<budgetMs&&current.unplacedStacks>0&&round++<6){
+          const targets=[...(current.unplaced||[])].sort((a,b)=>(Number(b.qty)||1)-(Number(a.qty)||1)||area(b)-area(a));
+          const focus=targets[0];if(!focus)break;
+          const key=measureKey(focus),beforeTarget=targetRemaining(current,key);
+          let focusWinner=current;
+          for(const profile of ['tight','balanced','large-base']){
+            if(performance.now()-started>budgetMs)break;
+            // Reconstituye TODAS las cantidades desde las capas actuales y las
+            // pendientes, pero sesga el apilado hacia la medida objetivo.
+            const rebuiltInput=buildStackingFirstLoad(current.stacks,current.unplaced,this.state.library,profile,targets);
+            const preview=preparePreviewLayout(rebuiltInput,this.state.trailer);
+            if(preview.placed.length){
+              const direct={stacks:preview.placed,unplaced:preview.pending,efficiency:calculateLoadStatistics(preview.placed,this.state.trailer).efficiency};
+              const norm=accept(local,direct,strategy,`${variantName} · rescate enfocado ${key} · ${profile} · directo`,current.mixedCount||0);
+              if(norm){
+                const nr=targetRemaining(norm,key),br=targetRemaining(focusWinner,key);
+                if(nr<br||(nr===br&&targetStacks(norm,key)<targetStacks(focusWinner,key))||(nr===br&&targetStacks(norm,key)===targetStacks(focusWinner,key)&&compare(norm,focusWinner)<0))focusWinner=norm;
+              }
+            }
+            const remainingBudget=Math.max(700,Math.min(modeConfig.deepMs*1.6,budgetMs-(performance.now()-started)));
+            if(remainingBudget<700)break;
+            const report=await Optimizer.optimizeDeep(rebuiltInput,this.state.trailer,{totalMs:remainingBudget,quickMs:Math.min(900,remainingBudget*.25),seed:Date.now()+strategy.id*810001+pass*19001+round*101+profile.length*37,patterns:[],strategies:[]});
+            for(const sol of (report.solutions||[]).slice(0,8)){
+              const norm=accept(local,sol,strategy,`${variantName} · rescate enfocado ${key} · ${profile}`,current.mixedCount||0);if(!norm)continue;
+              const nr=targetRemaining(norm,key),br=targetRemaining(focusWinner,key);
+              if(nr<br||(nr===br&&targetStacks(norm,key)<targetStacks(focusWinner,key))||(nr===br&&targetStacks(norm,key)===targetStacks(focusWinner,key)&&compare(norm,focusWinner)<0))focusWinner=norm;
+            }
+          }
+          const afterTarget=targetRemaining(focusWinner,key);
+          if(afterTarget<beforeTarget){
+            current=focusWinner;
+            if(compare(current,winner)<0)winner=current;
+            previewStrategy(strategy,current,`Estrategia ${strategy.id}: rescate enfocado ${key} redujo ${beforeTarget}→${afterTarget} pallets objetivo · ${current.unplacedStacks} pendientes`);
+            await new Promise(r=>setTimeout(r,140));
+            if(current.unplacedStacks===0)return current;
+            continue;
+          }
+          // Si el apilado dirigido no absorbió la medida, abre un vecindario
+          // diseñado alrededor de su huella y obliga a colocarla primero.
+          const placed=clone(current.stacks||[]),pending=clone(current.unplaced||[]);
+          const movable=placed.filter(x=>!x.locked);
+          const fitScore=s=>{
+            const fw=Number(focus.w)||0,fl=Number(focus.l)||0,sw=Number(s.w)||0,sl=Number(s.l)||0;
+            const canSupport=(sw+EPS>=fw&&sl+EPS>=fl)||(sw+EPS>=fl&&sl+EPS>=fw);
+            const dimensionGap=Math.min(Math.abs(sw-fw)+Math.abs(sl-fl),Math.abs(sw-fl)+Math.abs(sl-fw));
+            return (canSupport?0:100000)+dimensionGap*100+Math.abs(area(s)-area(focus));
+          };
+          const selected=[...movable].sort((a,b)=>fitScore(a)-fitScore(b)||(Number(a.qty)||1)-(Number(b.qty)||1)).slice(0,Math.min(mode==='deep'?18:mode==='balanced'?13:9,movable.length));
+          if(!selected.length)break;
+          const ids=new Set(selected.map(x=>x.id)),base=placed.filter(x=>!ids.has(x.id)),restPending=pending.filter(x=>measureKey(x)!==key),focusPending=pending.filter(x=>measureKey(x)===key);
+          const pool=[...focusPending,...selected,...restPending];
+          let zoneWinner=current;
+          for(let attempt=0;attempt<Math.max(3,modeConfig.refinePasses+2)&&performance.now()-started<budgetMs;attempt++){
+            const order=attempt===0?pool:attempt===1?[...focusPending,...selected.sort((a,b)=>area(b)-area(a)),...restPending]:seededShuffle(pool,560000+strategy.id*10000+pass*701+round*97+attempt*8191);
+            const rebuilt=beamReinsert(base,order,Math.max(48,modeConfig.beamWidth*7),570000+round*101+attempt*193);
+            const sol={stacks:rebuilt.stacks,unplaced:rebuilt.unplaced,efficiency:calculateLoadStatistics(rebuilt.stacks,this.state.trailer).efficiency};
+            const norm=accept(local,sol,strategy,`${variantName} · rescate enfocado ${key} · vecindario ${round}.${attempt+1}`,current.mixedCount||0);if(!norm)continue;
+            const nr=targetRemaining(norm,key),br=targetRemaining(zoneWinner,key);
+            if(nr<br||(nr===br&&compare(norm,zoneWinner)<0))zoneWinner=norm;
+            if(nr===0&&compare(norm,winner)<0)winner=norm;
+          }
+          if(targetRemaining(zoneWinner,key)<beforeTarget){
+            current=zoneWinner;if(compare(current,winner)<0)winner=current;
+            previewStrategy(strategy,current,`Estrategia ${strategy.id}: vecindario objetivo ${key} mejoró el cierre · ${current.unplacedStacks} pendientes`);
+            await new Promise(r=>setTimeout(r,140));
+          }else break;
+        }
+        return compare(winner,originalBest)<0?winner:null;
+      };
+
+      // v5.57: RECONSTRUCCIÓN REGIONAL DIRIGIDA. Cuando el rescate enfocado
+      // identifica una medida dominante pendiente, deja de mover piezas aisladas:
+      // abre regiones completas (nariz, centro, puertas y alrededor de familias
+      // compatibles), retira todas las pilas móviles de esa región y reconstruye
+      // con la medida objetivo primero. Puede atravesar un empate temporal si con
+      // ello elimina pallets de la medida objetivo; solo publica una mejora global.
+      const tryDirectedRegionalRebuild=(best,strategy,local,variantName,pass,budgetMs)=>{
+        if(!(best.unplaced||[]).length||best.unplaced.length>5)return null;
+        const started=performance.now(),originalBest=best;
+        const measureKey=s=>{const a=Number(s.w)||0,b=Number(s.l)||0;return `${Math.min(a,b)}x${Math.max(a,b)}`;};
+        const grouped=new Map();
+        for(const p of (best.unplaced||[])){
+          const k=measureKey(p),g=grouped.get(k)||{key:k,pallets:0,stacks:0,items:[]};
+          g.pallets+=Number(p.qty)||1;g.stacks++;g.items.push(clone(p));grouped.set(k,g);
+        }
+        const focusGroup=[...grouped.values()].sort((a,b)=>b.pallets-a.pallets||b.stacks-a.stacks||b.items.reduce((n,x)=>n+area(x),0)-a.items.reduce((n,x)=>n+area(x),0))[0];
+        if(!focusGroup)return null;
+        const key=focusGroup.key,focusPending=focusGroup.items;
+        const targetLong=Math.max(...focusPending.map(x=>Math.max(Number(x.w)||0,Number(x.l)||0)),1);
+        const targetShort=Math.max(...focusPending.map(x=>Math.min(Number(x.w)||0,Number(x.l)||0)),1);
+        const remainingTarget=sol=>(sol.unplaced||[]).filter(x=>measureKey(x)===key).reduce((n,x)=>n+(Number(x.qty)||1),0);
+        const placed=clone(best.stacks||[]),pending=clone(best.unplaced||[]),used=Math.max(1,Geometry.usedLength(placed));
+        const movable=placed.filter(x=>!x.locked);if(!movable.length)return null;
+        const windows=[];
+        const addWindow=(start,end,label)=>{start=Math.max(0,start);end=Math.min(this.state.trailer.length,Math.max(start+targetLong,end));if(end-start>=targetLong*.8)windows.push({start,end,label});};
+        // Tres grandes sectores deliberados: esto permite romper un tercio entero
+        // del trailer si la medida dominante no puede absorberse localmente.
+        addWindow(0,Math.min(used,Math.max(used*.34,targetLong*2.2)),'nariz');
+        addWindow(Math.max(0,used*.33-targetLong*.55),Math.min(used,used*.72+targetLong*.25),'centro');
+        addWindow(Math.max(0,used-Math.max(used*.38,targetLong*2.5)),used,'puertas');
+        // Ventanas centradas en pilas de longitud/huella compatible con la pendiente.
+        for(const s of movable){
+          const long=Math.max(Number(s.w)||0,Number(s.l)||0),short=Math.min(Number(s.w)||0,Number(s.l)||0);
+          const compatible=Math.abs(long-targetLong)<=Math.max(8,targetLong*.18)||Math.abs(short-targetShort)<=Math.max(6,targetShort*.22);
+          if(!compatible)continue;
+          const c=(Number(s.y)||0)+(Number(s.l)||0)/2,span=Math.max(targetLong*2.8,used*.30);
+          addWindow(c-span/2,c+span/2,`familia-${Math.round(long)}`);
+        }
+        const seen=new Set();let winner=best,working=best,attempt=0;
+        for(const win of windows){
+          if(performance.now()-started>=budgetMs)break;
+          const sig=`${Math.round(win.start)}:${Math.round(win.end)}`;if(seen.has(sig))continue;seen.add(sig);
+          const currentPlaced=clone(working.stacks||[]),currentPending=clone(working.unplaced||[]);
+          let zone=currentPlaced.filter(s=>!s.locked&&((Number(s.y)||0)<win.end&&((Number(s.y)||0)+(Number(s.l)||0))>win.start));
+          if(!zone.length)continue;
+          // Expande el vecindario con pilas de la misma familia aunque queden justo
+          // fuera de la ventana. Esto es clave para 26x118 / 28x150 y similares.
+          const family=[...currentPlaced].filter(s=>!s.locked&&!zone.some(z=>z.id===s.id)).filter(s=>{
+            const long=Math.max(Number(s.w)||0,Number(s.l)||0),short=Math.min(Number(s.w)||0,Number(s.l)||0);
+            return Math.abs(long-targetLong)<=Math.max(8,targetLong*.15)||Math.abs(short-targetShort)<=Math.max(5,targetShort*.18);
+          }).sort((a,b)=>Math.abs(((a.y||0)+(a.l||0)/2)-(win.start+win.end)/2)-Math.abs(((b.y||0)+(b.l||0)/2)-(win.start+win.end)/2));
+          zone=[...zone,...family.slice(0,mode==='deep'?8:mode==='balanced'?5:3)];
+          const ids=new Set(zone.map(x=>x.id)),base=currentPlaced.filter(x=>!ids.has(x.id));
+          if(!validateLayout(base,this.state.trailer).ok)continue;
+          const targetNow=currentPending.filter(x=>measureKey(x)===key),otherPending=currentPending.filter(x=>measureKey(x)!==key);
+          const sameFamily=zone.filter(s=>{const long=Math.max(Number(s.w)||0,Number(s.l)||0),short=Math.min(Number(s.w)||0,Number(s.l)||0);return Math.abs(long-targetLong)<=Math.max(8,targetLong*.18)||Math.abs(short-targetShort)<=Math.max(6,targetShort*.22);});
+          const otherZone=zone.filter(s=>!sameFamily.some(x=>x.id===s.id));
+          const pool=[...targetNow,...sameFamily,...otherPending,...otherZone];
+          const orders=[
+            [...targetNow,...sameFamily.sort((a,b)=>(Number(b.qty)||1)-(Number(a.qty)||1)||area(b)-area(a)),...otherPending,...otherZone],
+            [...targetNow,...zone.sort((a,b)=>Math.max(b.w,b.l)-Math.max(a.w,a.l)||area(b)-area(a)),...otherPending],
+            [...targetNow,...otherPending,...zone],
+            [...pool].sort((a,b)=>(measureKey(a)===key?-1:0)-(measureKey(b)===key?-1:0)||(Number(b.qty)||1)-(Number(a.qty)||1)||area(b)-area(a)),
+            seededShuffle(pool,0x575700+strategy.id*1009+pass*97+attempt*8191)
+          ];
+          let regionBest=null,targetBest=null;
+          for(let oi=0;oi<orders.length&&performance.now()-started<budgetMs;oi++){
+            attempt++;
+            const beam=Math.max(72,mode==='deep'?Math.min(260,modeConfig.beamWidth*12):mode==='balanced'?Math.min(160,modeConfig.beamWidth*10):72);
+            const rebuilt=beamReinsert(base,orders[oi],beam,0x575700+attempt*7919+oi*131);
+            let stacks=clone(rebuilt.stacks||[]),left=clone(rebuilt.unplaced||[]);
+            const compacted=new LoadEngine(this.state.trailer).compact(stacks);if(compacted?.ok)stacks=compacted.stacks;
+            if(left.length){const next=[];for(const raw of [...left].sort((a,b)=>(measureKey(a)===key?-1:0)-(measureKey(b)===key?-1:0)||(Number(b.qty)||1)-(Number(a.qty)||1))){const fit=insertBestPose(raw,stacks);if(fit)stacks.push(fit);else next.push(raw);}left=next;}
+            const sol={stacks,unplaced:left,efficiency:calculateLoadStatistics(stacks,this.state.trailer).efficiency};
+            const norm=accept(local,sol,strategy,`${variantName} · reconstrucción regional ${key} · ${win.label} · ${oi+1}`,best.mixedCount||0);if(!norm)continue;
+            if(!regionBest||compare(norm,regionBest)<0)regionBest=norm;
+            const nr=remainingTarget(norm),br=targetBest?remainingTarget(targetBest):Infinity;
+            if(nr<br||(nr===br&&compare(norm,targetBest||working)<0))targetBest=norm;
+            if(norm.unplacedStacks===0)return norm;
+          }
+          // Usa un empate que elimine la medida objetivo como trampolín interno,
+          // aunque no sea todavía la mejor solución global.
+          if(targetBest&&remainingTarget(targetBest)<remainingTarget(working))working=targetBest;
+          if(regionBest&&compare(regionBest,winner)<0)winner=regionBest;
+          if(working!==best&&working.unplacedStacks>0){
+            const rescue=greedyReinsert(working.stacks,working.unplaced,'area-desc');
+            const sol={stacks:rescue.stacks,unplaced:rescue.unplaced,efficiency:calculateLoadStatistics(rescue.stacks,this.state.trailer).efficiency};
+            const norm=accept(local,sol,strategy,`${variantName} · reconstrucción regional ${key} · recuperación`,best.mixedCount||0);
+            if(norm&&compare(norm,winner)<0)winner=norm;
+          }
+        }
+        return compare(winner,originalBest)<0?winner:null;
+      };
+
+      // v5.57: modo de cierre dirigido. Cuando quedan cinco pilas o menos,
       // congela la mayor parte del trailer y reconstruye exhaustivamente ventanas
       // locales alrededor de los huecos. El objetivo principal es cargar pallets,
       // no conservar el acomodo previo.
@@ -2919,13 +3116,23 @@ function normalizeLibraryItem(raw={}){
             local.sort(compare);const candidate=local[0];
             if(neighborhood&&candidate&&compare(candidate,best)<0){best=candidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: reconstrucción local mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,110));}
           }
-          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs){
-            const closure=tryExactClosure(best,strategy,local,variantName,pass,Math.min(modeConfig.exactClosureMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs-(performance.now()-refinementStarted))));
+          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs){
+            const focusBudget=Math.min(modeConfig.focusRescueMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs-(performance.now()-refinementStarted)));
+            const focused=await tryFocusedPendingRescue(best,strategy,local,variantName,pass,focusBudget);local.sort(compare);let focusedCandidate=local[0];
+            if(focused&&focusedCandidate&&compare(focusedCandidate,best)<0){best=focusedCandidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: rescate enfocado de pendientes mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,150));}
+          }
+          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs+modeConfig.regionalMs){
+            const regionalBudget=Math.min(modeConfig.regionalMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs+modeConfig.regionalMs-(performance.now()-refinementStarted)));
+            const regional=tryDirectedRegionalRebuild(best,strategy,local,variantName,pass,regionalBudget);local.sort(compare);let regionalCandidate=local[0];
+            if(regional&&regionalCandidate&&compare(regionalCandidate,best)<0){best=regionalCandidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: reconstrucción regional dirigida mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,160));}
+          }
+          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs+modeConfig.regionalMs){
+            const closure=tryExactClosure(best,strategy,local,variantName,pass,Math.min(modeConfig.exactClosureMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs+modeConfig.regionalMs-(performance.now()-refinementStarted))));
             local.sort(compare);let closureCandidate=local[0];
             if(closure&&closureCandidate&&compare(closureCandidate,best)<0){best=closureCandidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: cierre dirigido mejoró el plano · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,140));}
           }
-          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs+modeConfig.ruinMs){
-            const ruinBudget=Math.min(modeConfig.ruinMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs+modeConfig.ruinMs-(performance.now()-refinementStarted)));
+          if(best.unplacedStacks<=5&&best.unplacedStacks>0&&performance.now()-refinementStarted<=phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs+modeConfig.regionalMs+modeConfig.ruinMs){
+            const ruinBudget=Math.min(modeConfig.ruinMs,Math.max(1200,phaseBudget+modeConfig.lastMileMs+modeConfig.focusRescueMs+modeConfig.regionalMs+modeConfig.ruinMs-(performance.now()-refinementStarted)));
             const ruined=tryRuinRecreateSacrifice(best,strategy,local,variantName,pass,ruinBudget);local.sort(compare);let ruinCandidate=local[0];
             if(ruined&&ruinCandidate&&compare(ruinCandidate,best)<0){best=ruinCandidate;improved=true;previewStrategy(strategy,best,`Estrategia ${strategy.id}: sacrificio y reconstrucción mejoró el cierre · ${best.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,150));}
           }
@@ -2951,7 +3158,7 @@ function normalizeLibraryItem(raw={}){
       try{
         outerStrategies: for(const strategy of strategies){
           if(!isActive()||performance.now()-optimizationStarted>modeConfig.globalMs)break;
-          // v5.55: reconstruye en una copia virtual. El gráfico conserva la última
+          // v5.57: reconstruye en una copia virtual. El gráfico conserva la última
           // solución válida hasta que esta estrategia produzca su primer candidato.
           $("optimizerSummary").textContent=`Estrategia ${strategy.id} de 3: ${strategy.label} · trabajando sobre copia virtual limpia…`;
           await new Promise(r=>setTimeout(r,90));
@@ -2972,7 +3179,7 @@ function normalizeLibraryItem(raw={}){
               if(local[0]&&(!liveBest||compare(local[0],liveBest)<0)){
                 liveBest=clone(local[0]);previewStrategy(strategy,liveBest,`Estrategia ${strategy.id}: primera reconstrucción válida · ${liveBest.loadedStacks} dentro · ${liveBest.unplacedStacks} pendientes`);await new Promise(r=>setTimeout(r,70));
               }
-              // v5.55: reutiliza resultados geométricos equivalentes y limita el presupuesto según el modo.
+              // v5.57: reutiliza resultados geométricos equivalentes y limita el presupuesto según el modo.
               const cacheKey=`${signature(variant.input)}::${profile}::${mode}`;
               let cached=geometryCache.get(cacheKey);
               if(!cached){
@@ -3071,7 +3278,7 @@ function normalizeLibraryItem(raw={}){
       const plan=createPlanCanvas(this.state.stacks,this.state.trailer,{title:'LoadMaster AI · Plano de carga'}),summary=this.buildExportSummary();
       const extra=280+Math.max(0,summary.pendingGroups.length-1)*28+Math.max(0,summary.stacked.length-1)*28,canvas=document.createElement('canvas');canvas.width=plan.width;canvas.height=plan.height+extra;const ctx=canvas.getContext('2d');ctx.fillStyle='#eef1f5';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(plan,0,0);let y=plan.height+38;ctx.fillStyle='#111827';ctx.font='700 24px system-ui, sans-serif';ctx.fillText('Resumen de la solución',34,y);y+=34;ctx.font='16px system-ui, sans-serif';ctx.fillText(`Estrategia: ${summary.strategy}`,34,y);y+=26;ctx.fillText(`${summary.loadedStacks} pilas / ${summary.loadedPallets} pallets dentro · ${summary.pendingStacks} pilas / ${summary.pendingPallets} pallets pendientes`,34,y);y+=30;ctx.font='700 17px system-ui, sans-serif';ctx.fillText('Sobrantes:',34,y);y+=24;ctx.font='15px system-ui, sans-serif';if(!summary.pendingGroups.length){ctx.fillText('Ninguno. Carga completa.',52,y);y+=24}else for(const g of summary.pendingGroups){ctx.fillText(`• ${g.qty} pallets de ${g.measure}`,52,y);y+=24}ctx.font='700 17px system-ui, sans-serif';ctx.fillText('Apilamientos mixtos:',34,y);y+=24;ctx.font='15px system-ui, sans-serif';if(!summary.stacked.length){ctx.fillText('No se realizaron apilamientos mixtos.',52,y)}else for(const a of summary.stacked){ctx.fillText(`• ${a.topQty} de ${a.top} sobre ${a.baseQty} de ${a.base} · altura total ${a.total}`,52,y);y+=24}return canvas;
     }
-    saveFile(){const blob=new Blob([JSON.stringify({version:"5.55",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.55.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+    saveFile(){const blob=new Blob([JSON.stringify({version:"5.57",...this.state},null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="loadmaster-carga-v5.57.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
     saveImage(){
       if(!this.state.stacks.length)return this.toast("No hay una carga para guardar como imagen");
       const validation=validateLayout(this.state.stacks,this.state.trailer);
@@ -3097,7 +3304,7 @@ function normalizeLibraryItem(raw={}){
       if(info.reasons.length){ctx.fillStyle="#92400e";ctx.font="19px system-ui, sans-serif";ctx.fillText(`Observación: ${info.reasons.join(" · ")}`,85,480);}
       const plan=createPlanCanvas(this.state.stacks,this.state.trailer,{title:"Plano de carga"}),maxW=1080,maxH=1120,scale=Math.min(maxW/plan.width,maxH/plan.height),w=plan.width*scale,h=plan.height*scale,x=(canvas.width-w)/2,y=555+(maxH-h)/2;
       ctx.fillStyle="#fff";ctx.fillRect(55,535,1130,980);ctx.strokeStyle="#d1d5db";ctx.strokeRect(55,535,1130,980);ctx.drawImage(plan,x,y,w,h);
-      const summary=this.buildExportSummary();ctx.fillStyle="#111827";ctx.font="700 22px system-ui, sans-serif";ctx.textAlign="left";ctx.fillText("Resumen de sobrantes y apilamientos",85,1580);ctx.font="17px system-ui, sans-serif";let sy=1612;const pendingText=summary.pendingGroups.length?summary.pendingGroups.map(g=>`${g.qty} de ${g.measure}`).join(" · "):"Ninguno";ctx.fillText(`Pendientes: ${summary.pendingStacks} pilas / ${summary.pendingPallets} pallets · ${pendingText}`,85,sy);sy+=27;const stackText=summary.stacked.length?summary.stacked.map(a=>`${a.topQty} ${a.top} sobre ${a.baseQty} ${a.base}`).join(" · "):"Sin apilamientos mixtos";ctx.fillText(`Apilado: ${stackText}`,85,sy);ctx.fillStyle="#6b7280";ctx.font="17px system-ui, sans-serif";ctx.textAlign="center";ctx.fillText("Generado por LoadMaster AI v5.55 · Verifique el plano antes de ejecutar la carga.",620,1730);ctx.textAlign="left";return canvas;
+      const summary=this.buildExportSummary();ctx.fillStyle="#111827";ctx.font="700 22px system-ui, sans-serif";ctx.textAlign="left";ctx.fillText("Resumen de sobrantes y apilamientos",85,1580);ctx.font="17px system-ui, sans-serif";let sy=1612;const pendingText=summary.pendingGroups.length?summary.pendingGroups.map(g=>`${g.qty} de ${g.measure}`).join(" · "):"Ninguno";ctx.fillText(`Pendientes: ${summary.pendingStacks} pilas / ${summary.pendingPallets} pallets · ${pendingText}`,85,sy);sy+=27;const stackText=summary.stacked.length?summary.stacked.map(a=>`${a.topQty} ${a.top} sobre ${a.baseQty} ${a.base}`).join(" · "):"Sin apilamientos mixtos";ctx.fillText(`Apilado: ${stackText}`,85,sy);ctx.fillStyle="#6b7280";ctx.font="17px system-ui, sans-serif";ctx.textAlign="center";ctx.fillText("Generado por LoadMaster AI v5.57 · Verifique el plano antes de ejecutar la carga.",620,1730);ctx.textAlign="left";return canvas;
     }
     makeProfessionalPdf(){return canvasToPdfBlob(this.createProfessionalReportCanvas());}
     saveProfessionalPdf(){
@@ -3193,7 +3400,7 @@ function normalizeLibraryItem(raw={}){
 
 
 
-// v5.55: apilamiento previo y posterior con reducción real del conteo de pilas
+// v5.57: apilamiento previo y posterior con reducción real del conteo de pilas
 (function initThemeController(){
   const STORAGE_KEY="loadmaster-theme";
   const root=document.documentElement;
